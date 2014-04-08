@@ -17,6 +17,12 @@ In your graphite-api config file::
 
     finders:
       - graphite_influxdb.InfluxdbFinder
+    influxdb:
+       host: "localhost"
+       port: 8086
+       user: "graphite"
+       pass: "graphite"
+       db:   "graphite"
 
 Using with graphite-web
 -----------------------
@@ -26,3 +32,8 @@ In graphite's ``local_settings.py``::
     STORAGE_FINDERS = (
         'graphite_influxdb.InfluxdbFinder',
     )
+    INFLUXDB_HOST = "localhost"
+    INFLUXDB_PORT = 8086
+    INFLUXDB_USER = "graphite"
+    INFLUXDB_PASS = "graphite"
+    INFLUXDB_DB =  "graphite"

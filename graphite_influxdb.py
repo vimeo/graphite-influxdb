@@ -9,6 +9,21 @@ from influxdb import InfluxDBClient
 
 
 def config_to_client(config=None):
+    if config is not None:
+        cfg = config.get('influxdb', {})
+        host = cfg.get('host', 'localhost')
+        port = cfg.get('port', 8086)
+        user = cfg.get('user', 'graphite')
+        passw = cfg.get('pass', 'graphite')
+        db = cfg.get('db', 'graphite')
+    else:
+        from django.conf import settings
+        host = getattr(settings, 'INFLUXDB_HOST', 'localhost')
+        port = getattr(settings, 'INFLUXDB_PORT', 8086)
+        user = getattr(settings, 'INFLUXDB_USER', 'graphite')
+        passw = getattr(settings, 'INFLUXDB_PASS', 'graphite')
+        db = getattr(settings, 'INFLUXDB_DB', 'graphite')
+
     return InfluxDBClient(host, port, user, passw, db)
 
 
