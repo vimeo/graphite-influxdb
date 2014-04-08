@@ -10,7 +10,7 @@ setup(
     author_email='dieter@vimeo.com',
     description=('Influxdb backend plugin for graphite-web and graphite-api'),
     long_description=open('README.rst').read(),
-    py_modules=('influxdb',),
+    py_modules=('graphite_influxdb',),
     zip_safe=False,
     include_package_data=True,
     platforms='any',
