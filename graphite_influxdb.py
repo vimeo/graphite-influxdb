@@ -1,3 +1,5 @@
+import re
+
 try:
     from graphite_api.intervals import Interval, IntervalSet
     from graphite_api.node import LeafNode, BranchNode
@@ -73,13 +75,15 @@ class InfluxdbFinder(object):
     def find_nodes(self, query):
         # query.pattern is basically regex, though * should become [^\.]+ and . \.
         # but list series doesn't support pattern matching/regex yet
+        regex = query.pattern.replace('.', '\.').replace('*', '[^\.]+')
+        regex = re.compile(regex)
         series = self.client.query("list series")
-        series = [s['name'] for s in series]
+        series = [s['name'] for s in series if regex.match(s['name']) is not None]
         seen_branches = set()
         # for leaf "a.b.c" we should yield branches "a" and "a.b"
         for s in series:
             yield LeafNode(s, InfluxdbReader(self.client, s))
-            branch = s
+            branch = s.rpartition('.')[0]
             while branch != '' and branch not in seen_branches:
                 yield BranchNode(branch)
                 seen_branches.add(branch)
