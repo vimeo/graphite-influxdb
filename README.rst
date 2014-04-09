@@ -18,11 +18,11 @@ In your graphite-api config file::
     finders:
       - graphite_influxdb.InfluxdbFinder
     influxdb:
-       host: "localhost"
+       host: localhost
        port: 8086
-       user: "graphite"
-       pass: "graphite"
-       db:   "graphite"
+       user: graphite
+       pass: graphite
+       db:   graphite
 
 Using with graphite-web
 -----------------------
