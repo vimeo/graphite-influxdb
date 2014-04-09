@@ -3,7 +3,7 @@ from setuptools import setup
 
 setup(
     name='graphite-influxdb',
-    version='0.1.1',
+    version='0.1.2',
     url='https://github.com/vimeo/graphite-influxdb',
     license='apache2',
     author='Dieter Plaetinck',
