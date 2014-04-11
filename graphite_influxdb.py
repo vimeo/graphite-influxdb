@@ -1,5 +1,5 @@
 import re
-import logging
+import structlog
 
 try:
     from graphite_api.intervals import Interval, IntervalSet
@@ -9,6 +9,8 @@ except ImportError:
     from graphite.node import LeafNode, BranchNode
 
 from influxdb import InfluxDBClient
+
+logger = structlog.get_logger()
 
 
 def config_to_client(config=None):
@@ -31,15 +33,16 @@ def config_to_client(config=None):
 
 
 class InfluxdbReader(object):
-    __slots__ = ('client', 'path', 'logger')
+    __slots__ = ('client', 'path')
 
-    def __init__(self, client, path, logger):
+    def __init__(self, client, path):
         self.client = client
         self.path = path
-        self.logger = logger
 
     def fetch(self, start_time, end_time):
-        data = self.client.query("select time, value from %s where time > %ds and time < %ds order asc" % (self.path, start_time, end_time))
+        data = self.client.query("select time, value from %s where time > %ds "
+                                 "and time < %ds order asc" % (
+                                     self.path, start_time, end_time))
         datapoints = []
         start = 0
         end = 0
@@ -53,13 +56,16 @@ class InfluxdbReader(object):
         except Exception:
             pass
         time_info = start, end, step
-        self.logger.debug("influx REQUESTED RANGE for %s: %d to %d" % (self.path, start_time, end_time))
-        self.logger.debug("influx RETURNED  RANGE for %s: %d to %d" % (self.path, start, end))
+        logger.debug("influx REQUESTED RANGE for %s: %d to %d" % (
+            self.path, start_time, end_time))
+        logger.debug("influx RETURNED  RANGE for %s: %d to %d" % (
+            self.path, start, end))
         return time_info, datapoints
 
     def get_intervals(self):
         last_data = self.client.query("select * from %s limit 1" % self.path)
-        first_data = self.client.query("select * from %s limit 1 order asc" % self.path)
+        first_data = self.client.query("select * from %s limit 1 order asc" %
+                                       self.path)
         last = 0
         first = 0
         try:
@@ -71,34 +77,33 @@ class InfluxdbReader(object):
 
 
 class InfluxdbFinder(object):
-    __slots__ = ('client', 'logger')
+    __slots__ = ('client',)
 
     def __init__(self, config=None):
         self.client = config_to_client(config)
-        # from graphite_api.app import app
-        # self.logger = app.logger
-        logging.basicConfig()
-        self.logger = logging.getLogger("graphite-influxdb")
-        self.logger.setLevel(logging.DEBUG)
 
     def find_nodes(self, query):
-        # query.pattern is basically regex, though * should become [^\.]+ and . \.
+        # query.pattern is basically regex, though * should become [^\.]+
+        # and . \.
         # but list series doesn't support pattern matching/regex yet
-        regex = query.pattern.replace('.', '\.').replace('*', '[^\.]+')
-        self.logger.info("find_nodes query: %s -> %s" % (query.pattern, regex))
+        regex = '^{0}$'.format(
+            query.pattern.replace('.', '\.').replace('*', '[^\.]+')
+        )
+        logger.info("searching for nodes", pattern=query.pattern, regex=regex)
         regex = re.compile(regex)
         series = self.client.query("list series")
-        for s in series:
-            self.logger.info("matching %s" % s['name'])
-        series = [s['name'] for s in series if regex.match(s['name']) is not None]
+
         seen_branches = set()
-        # for leaf "a.b.c" we should yield branches "a" and "a.b"
         for s in series:
-            self.logger.info("leaf %s" % s)
-            yield LeafNode(s, InfluxdbReader(self.client, s, self.logger))
-            branch = s.rpartition('.')[0]
-            while branch != '' and branch not in seen_branches:
-                self.logger.info("branch %s" % branch)
-                yield BranchNode(branch)
-                seen_branches.add(branch)
-                branch = branch.rpartition('.')[0]
+            name = s['name']
+            if regex.match(name) is not None:
+                logger.debug("found leaf", name=name)
+                yield LeafNode(name, InfluxdbReader(self.client, name))
+
+            while '.' in name:
+                name = name.rsplit('.', 1)[0]
+                if name not in seen_branches:
+                    seen_branches.add(name)
+                    if regex.match(name) is not None:
+                        logger.debug("found branch", name=name)
+                        yield BranchNode(name)
