@@ -52,7 +52,21 @@ class InfluxdbReader(object):
             start = points[0][0]
             end = points[-1][0]
             step = points[1][0] - start
-            datapoints = [p[2] for p in points]
+            steps = int((end - start) / step)
+            if len(points) == steps + 1:
+                logger.debug("No steps missing")
+                datapoints = [p[2] for p in points]
+            else:
+                logger.debug("Fill missing steps with None values")
+                next_point = 0
+                for s in range(0, steps):
+                    if points[next_point][0] <= start + step * s:
+                        datapoints.append(points[next_point][2])
+                        if next_point < len(points):
+                            next_point += 1
+                    else:
+                        datapoints.append(None)
+
         except Exception:
             pass
         time_info = start, end, step
