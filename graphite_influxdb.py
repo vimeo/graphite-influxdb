@@ -40,8 +40,8 @@ class InfluxdbReader(object):
         self.path = path
 
     def fetch(self, start_time, end_time):
-        data = self.client.query("select time, value from %s where time > %ds "
-                                 "and time < %ds order asc" % (
+        data = self.client.query('select time, value from "%s" where time > %ds '
+                                 'and time < %ds order asc' % (
                                      self.path, start_time, end_time))
         datapoints = []
         start = 0
@@ -63,8 +63,8 @@ class InfluxdbReader(object):
         return time_info, datapoints
 
     def get_intervals(self):
-        last_data = self.client.query("select * from %s limit 1" % self.path)
-        first_data = self.client.query("select * from %s limit 1 order asc" %
+        last_data = self.client.query('select * from "%s" limit 1' % self.path)
+        first_data = self.client.query('select * from "%s" limit 1 order asc' %
                                        self.path)
         last = 0
         first = 0
