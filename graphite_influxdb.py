@@ -53,13 +53,14 @@ class InfluxdbReader(object):
             end = points[-1][0]
             step = points[1][0] - start
             steps = int((end - start) / step)
+            # if we have 3 datapoints: at 0, at 60 and 120, then step is 60, steps = 2 and should have 3 points
             if len(points) == steps + 1:
                 logger.debug("No steps missing")
                 datapoints = [p[2] for p in points]
             else:
                 logger.debug("Fill missing steps with None values")
                 next_point = 0
-                for s in range(0, steps):
+                for s in range(0, steps + 1):
                     if points[next_point][0] <= start + step * s:
                         datapoints.append(points[next_point][2])
                         if next_point < len(points):
