@@ -63,7 +63,7 @@ class InfluxdbReader(object):
                 for s in range(0, steps + 1):
                     if points[next_point][0] <= start + step * s:
                         datapoints.append(points[next_point][2])
-                        if next_point < len(points):
+                        if next_point + 1 < len(points):
                             next_point += 1
                     else:
                         datapoints.append(None)
