@@ -40,9 +40,13 @@ class InfluxdbReader(object):
         self.path = path
 
     def fetch(self, start_time, end_time):
+        # in graphite,
+        # from is exclusive (from=foo returns data at ts=foo+1 and higher)
+        # until is inclusive (until=bar returns data at ts=bar and lower)
+        # influx doesn't support <= and >= yet, hence the add.
         data = self.client.query('select time, value from "%s" where time > %ds '
                                  'and time < %ds order asc' % (
-                                     self.path, start_time, end_time))
+                                     self.path, start_time, end_time + 1))
         datapoints = []
         start = 0
         end = 0
