@@ -33,11 +33,12 @@ def config_to_client(config=None):
 
 
 class InfluxdbReader(object):
-    __slots__ = ('client', 'path')
+    __slots__ = ('client', 'path', 'step')
 
-    def __init__(self, client, path):
+    def __init__(self, client, path, step):
         self.client = client
         self.path = path
+        self.step = step
 
     def fetch(self, start_time, end_time):
         # in graphite,
@@ -50,13 +51,11 @@ class InfluxdbReader(object):
         datapoints = []
         start = 0
         end = 0
-        step = 10
         try:
             points = data[0]['points']
             start = points[0][0]
             end = points[-1][0]
-            step = points[1][0] - start
-            steps = int((end - start) / step)
+            steps = int((end - start) / self.step)
             # if we have 3 datapoints: at 0, at 60 and 120, then step is 60, steps = 2 and should have 3 points
             if len(points) == steps + 1:
                 logger.debug("No steps missing")
@@ -65,7 +64,7 @@ class InfluxdbReader(object):
                 logger.debug("Fill missing steps with None values")
                 next_point = 0
                 for s in range(0, steps + 1):
-                    if points[next_point][0] <= start + step * s:
+                    if points[next_point][0] <= start + self.step * s:
                         datapoints.append(points[next_point][2])
                         if next_point + 1 < len(points):
                             next_point += 1
@@ -74,9 +73,9 @@ class InfluxdbReader(object):
 
         except Exception:
             pass
-        time_info = start, end, step
-        logger.debug("influx REQUESTED RANGE for %s: %d to %d" % (
-            self.path, start_time, end_time))
+        time_info = start, end, self.step
+        logger.debug("influx REQUESTED RANGE for %s: %d to %d (both inclusive)" % (
+            self.path, start_time, end_time + 1))
         logger.debug("influx RETURNED  RANGE for %s: %d to %d" % (
             self.path, start, end))
         return time_info, datapoints
@@ -96,10 +95,15 @@ class InfluxdbReader(object):
 
 
 class InfluxdbFinder(object):
-    __slots__ = ('client',)
+    __slots__ = ('client', 'schemas')
 
     def __init__(self, config=None):
         self.client = config_to_client(config)
+        # we basically need to replicate /etc/carbon/storage-schemas.conf here
+        # so that for a given series name, and given from/to, we know the corresponding steps in influx
+        # for now we assume we don't do continuous queries yet, and have only one resolution per match-string
+        # for now, edit your settings here, TODO make this properly configurable or have it stored in influx and query influx
+        self.schemas = [(re.compile(''), 60)]
 
     def find_nodes(self, query):
         # query.pattern is basically regex, though * should become [^\.]+
@@ -117,7 +121,12 @@ class InfluxdbFinder(object):
             name = s['name']
             if regex.match(name) is not None:
                 logger.debug("found leaf", name=name)
-                yield LeafNode(name, InfluxdbReader(self.client, name))
+                res = 10
+                for (rule_patt, rule_res) in self.schemas:
+                    if rule_patt.match(name):
+                        res = rule_res
+                        break
+                yield LeafNode(name, InfluxdbReader(self.client, name, res))
 
             while '.' in name:
                 name = name.rsplit('.', 1)[0]
