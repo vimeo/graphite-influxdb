@@ -6,6 +6,8 @@ An influxdb backend for Graphite-web (source or 0.10.x) or graphite-api.
 Installation
 ------------
 
+Run maintain_cache.py, which keeps the cache up to date in a loop
+
 ::
 
     pip install graphite_influxdb
@@ -23,6 +25,14 @@ In your graphite-api config file::
        user: graphite
        pass: graphite
        db:   graphite
+
+Also enable the cache. memcache doesn't seem to work well because the list of series is too big.
+filesystem seems to work well::
+
+    cache:
+        CACHE_TYPE: 'filesystem'
+        CACHE_DIR: '/tmp/graphite-api-cache'
+
 
 Using with graphite-web
 -----------------------

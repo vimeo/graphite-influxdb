@@ -33,12 +33,13 @@ def config_to_client(config=None):
 
 
 class InfluxdbReader(object):
-    __slots__ = ('client', 'path', 'step')
+    __slots__ = ('client', 'path', 'step', 'cache')
 
-    def __init__(self, client, path, step):
+    def __init__(self, client, path, step, cache):
         self.client = client
         self.path = path
         self.step = step
+        self.cache = cache
 
     def fetch(self, start_time, end_time):
         # in graphite,
@@ -80,23 +81,54 @@ class InfluxdbReader(object):
         return time_info, datapoints
 
     def get_intervals(self):
-        last_data = self.client.query('select * from "%s" limit 1' % self.path)
-        first_data = self.client.query('select * from "%s" limit 1 order asc' %
-                                       self.path)
-        last = 0
-        first = 0
-        try:
-            last = last_data[0]['points'][0][0]
-            first = first_data[0]['points'][0][0]
-        except Exception:
-            pass
+        key_first = "%s_first" % self.path
+        first = self.cache.get(key_first)
+        if first is None:
+            print "CACHE MISS", key_first
+            q = 'select * from "%s" limit 1 order asc' % self.path
+            first_data = self.client.query(q)
+            first = 0
+            valid_res = False
+            try:
+                first = first_data[0]['points'][0][0]
+                valid_res = True
+            except Exception:
+                pass
+            if valid_res:
+                print "updating cache"
+                self.cache.add(key_first, first, timeout=self.step * 1000)
+        else:
+            print "CACHE HIT", key_first
+
+        key_last = "%s_last" % self.path
+        last = self.cache.get(key_last)
+        if last is None:
+            print "CACHE MISS", key_last
+            q = 'select * from "%s" limit 1' % self.path
+            last_data = self.client.query(q)
+            last = 0
+            valid_res = False
+            try:
+                last = last_data[0]['points'][0][0]
+                valid_res = True
+            except Exception:
+                pass
+            if valid_res:
+                print "updating cache"
+                self.cache.add(key_last, last, timeout=self.step)
+        else:
+            print "CACHE HIT", key_last
+
         return IntervalSet([Interval(first, last)])
 
 
 class InfluxdbFinder(object):
-    __slots__ = ('client', 'schemas')
+    __slots__ = ('client', 'schemas', 'cache')
 
     def __init__(self, config=None):
+        from graphite_api.app import app
+        self.cache = app.cache
+
         self.client = config_to_client(config)
         # we basically need to replicate /etc/carbon/storage-schemas.conf here
         # so that for a given series name, and given from/to, we know the corresponding steps in influx
@@ -113,11 +145,12 @@ class InfluxdbFinder(object):
         )
         logger.info("searching for nodes", pattern=query.pattern, regex=regex)
         regex = re.compile(regex)
-        series = self.client.query("list series")
+        series = self.cache.get("influxdb_list_series")
+        if series is None:
+            raise Exception("series not in cache. please run maintain_cache.py")
 
         seen_branches = set()
-        for s in series:
-            name = s['name']
+        for name in series:
             if regex.match(name) is not None:
                 logger.debug("found leaf", name=name)
                 res = 10
@@ -125,7 +158,7 @@ class InfluxdbFinder(object):
                     if rule_patt.match(name):
                         res = rule_res
                         break
-                yield LeafNode(name, InfluxdbReader(self.client, name, res))
+                yield LeafNode(name, InfluxdbReader(self.client, name, res, self.cache))
 
             while '.' in name:
                 name = name.rsplit('.', 1)[0]
