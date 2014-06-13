@@ -49,35 +49,34 @@ class InfluxdbReader(object):
                                  'and time < %ds order asc' % (
                                      self.path, start_time, end_time + 1))
         datapoints = []
-        start = 0
-        end = 0
         try:
             points = data[0]['points']
-            start = points[0][0]
-            end = points[-1][0]
-            steps = int((end - start) / self.step)
-            # if we have 3 datapoints: at 0, at 60 and 120, then step is 60, steps = 2 and should have 3 points
-            if len(points) == steps + 1:
-                logger.debug("No steps missing")
-                datapoints = [p[2] for p in points]
-            else:
-                logger.debug("Fill missing steps with None values")
-                next_point = 0
-                for s in range(0, steps + 1):
-                    if points[next_point][0] <= start + self.step * s:
-                        datapoints.append(points[next_point][2])
-                        if next_point + 1 < len(points):
-                            next_point += 1
-                    else:
-                        datapoints.append(None)
-
         except Exception:
-            pass
-        time_info = start, end, self.step
+            points = []
+        steps = int(round((end_time - start_time) * 1.0 / self.step))
+        # if we have 3 datapoints: at 0, at 60 and 120, then step is 60, steps = 2 and should have 3 points
+        # note that graphite assumes data at quantized intervals, whereas in influx they can be stored at like 07, 67, etc.
+        if len(points) == steps + 1:
+            logger.debug("No steps missing")
+            datapoints = [p[2] for p in points]
+        else:
+            logger.debug("Fill missing steps with None values")
+            next_point = 0
+            for s in range(0, steps + 1):
+                should_be_near = start_time + self.step * s
+                # even ininitially when next_point = 0, len(points) might be == 0
+                if len(points) > next_point and abs(points[next_point][0] - should_be_near) <= self.step / 2:
+                    datapoints.append(points[next_point][2])
+                    if next_point + 1 < len(points):
+                        next_point += 1
+                else:
+                    datapoints.append(None)
+
+        time_info = start_time, end_time, self.step
         logger.debug("influx REQUESTED RANGE for %s: %d to %d (both inclusive)" % (
             self.path, start_time, end_time + 1))
         logger.debug("influx RETURNED  RANGE for %s: %d to %d" % (
-            self.path, start, end))
+            self.path, start_time, end_time))
         return time_info, datapoints
 
     def get_intervals(self):
