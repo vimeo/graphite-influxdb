@@ -47,3 +47,16 @@ In graphite's ``local_settings.py``::
     INFLUXDB_USER = "graphite"
     INFLUXDB_PASS = "graphite"
     INFLUXDB_DB =  "graphite"
+
+
+Optional variable
+-----------------
+
+In graphite-api, using parameter `cheat_times: true`
+means assume we have data since the beginning of time until now.
+Since we automatically yield None's for unknown values, this
+doesn't really make any difference, graphs look the same,
+but now we don't query influx for the begin/end of each timeseries,
+which boosts performance.
+The default value of this is False.
+In graphite-web, the parameter is `INFLUXDB_CHEAT_TIMES`.

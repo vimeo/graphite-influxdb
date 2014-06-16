@@ -97,6 +97,10 @@ while True:
     duration(section, start)
 
 
+    if cfg.get('cheat_times'):
+        print "cheating on start/end time. no further influx queries needed..."
+        continue
+
     section = "influxdb:: select * from // order asc limit 1"
     print section
     start = time.time()

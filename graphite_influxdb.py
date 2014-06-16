@@ -1,5 +1,6 @@
 import re
 import structlog
+import time
 
 try:
     from graphite_api.intervals import Interval, IntervalSet
@@ -21,6 +22,7 @@ def config_to_client(config=None):
         user = cfg.get('user', 'graphite')
         passw = cfg.get('pass', 'graphite')
         db = cfg.get('db', 'graphite')
+        cheat_times = cfg.get('cheat_times', False)
     else:
         from django.conf import settings
         host = getattr(settings, 'INFLUXDB_HOST', 'localhost')
@@ -28,18 +30,20 @@ def config_to_client(config=None):
         user = getattr(settings, 'INFLUXDB_USER', 'graphite')
         passw = getattr(settings, 'INFLUXDB_PASS', 'graphite')
         db = getattr(settings, 'INFLUXDB_DB', 'graphite')
+        cheat_times = getattr(settings, 'INFLUXDB_CHEAT_TIMES', False)
 
-    return InfluxDBClient(host, port, user, passw, db)
+    return InfluxDBClient(host, port, user, passw, db), cheat_times
 
 
 class InfluxdbReader(object):
-    __slots__ = ('client', 'path', 'step', 'cache')
+    __slots__ = ('client', 'path', 'step', 'cache', 'cheat_times')
 
-    def __init__(self, client, path, step, cache):
+    def __init__(self, client, path, step, cache, cheat_times):
         self.client = client
         self.path = path
         self.step = step
         self.cache = cache
+        self.cheat_times = cheat_times
 
     def fetch(self, start_time, end_time):
         # in graphite,
@@ -81,6 +85,11 @@ class InfluxdbReader(object):
         return time_info, datapoints
 
     def get_intervals(self):
+        if self.cheat_times:
+            print "cheat_times enabled. this is gonna be quick.."
+            now = int(time.time())
+            return IntervalSet([Interval(1, now)])
+
         key_first = "%s_first" % self.path
         first = self.cache.get(key_first)
         if first is None:
@@ -123,13 +132,13 @@ class InfluxdbReader(object):
 
 
 class InfluxdbFinder(object):
-    __slots__ = ('client', 'schemas', 'cache')
+    __slots__ = ('client', 'schemas', 'cache', 'cheat_times')
 
     def __init__(self, config=None):
         from graphite_api.app import app
         self.cache = app.cache
 
-        self.client = config_to_client(config)
+        self.client, self.cheat_times = config_to_client(config)
         # we basically need to replicate /etc/carbon/storage-schemas.conf here
         # so that for a given series name, and given from/to, we know the corresponding steps in influx
         # for now we assume we don't do continuous queries yet, and have only one resolution per match-string
@@ -158,7 +167,7 @@ class InfluxdbFinder(object):
                     if rule_patt.match(name):
                         res = rule_res
                         break
-                yield LeafNode(name, InfluxdbReader(self.client, name, res, self.cache))
+                yield LeafNode(name, InfluxdbReader(self.client, name, res, self.cache, self.cheat_times))
 
             while '.' in name:
                 name = name.rsplit('.', 1)[0]
