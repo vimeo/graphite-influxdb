@@ -53,36 +53,61 @@ class InfluxdbReader(object):
         data = self.client.query('select time, value from "%s" where time > %ds '
                                  'and time < %ds order asc' % (
                                      self.path, start_time, end_time + 1))
-        datapoints = []
+
         try:
-            points = data[0]['points']
+            known_points = data[0]['points']
         except Exception:
-            points = []
-        steps = int(round((end_time - start_time) * 1.0 / self.step))
-        # if we have 3 datapoints: at 0, at 60 and 120, then step is 60, steps = 2 and should have 3 points
-        # note that graphite assumes data at quantized intervals, whereas in influx they can be stored at like 07, 67, etc.
-        if len(points) == steps + 1:
-            logger.debug("No steps missing")
-            datapoints = [p[2] for p in points]
-        else:
-            logger.debug("Fill missing steps with None values")
-            next_point = 0
-            for s in range(0, steps + 1):
-                should_be_near = start_time + self.step * s
-                # even ininitially when next_point = 0, len(points) might be == 0
-                if len(points) > next_point and abs(points[next_point][0] - should_be_near) <= self.step / 2:
-                    datapoints.append(points[next_point][2])
-                    if next_point + 1 < len(points):
-                        next_point += 1
-                else:
-                    datapoints.append(None)
+            known_points = []
+        datapoints = InfluxdbReader.fix_datapoints(known_points, start_time, end_time, self.step)
 
         time_info = start_time, end_time, self.step
         logger.debug("influx REQUESTED RANGE for %s: %d to %d (both inclusive)" % (
             self.path, start_time, end_time + 1))
         logger.debug("influx RETURNED  RANGE for %s: %d to %d" % (
             self.path, start_time, end_time))
+        print "RETURNING", len(datapoints), "datapoints"  # TODO make sure this is always correct
         return time_info, datapoints
+
+    @staticmethod
+    def fix_datapoints_multi(data, start_time, end_time, step):
+        out = {}
+        """
+        data looks like:
+        [{u'columns': [u'time', u'sequence_number', u'value'],
+          u'name': u'stats.timers.dfvimeoplayproxy3.varnish.miss.410.count_ps',
+            u'points': [[1402928319, 1, 0.133333],
+            ....
+        """
+        for seriesdata in data:
+            datapoints = InfluxdbReader.fix_datapoints(seriesdata['points'], start_time, end_time, step)
+            out[seriesdata['name']] = datapoints
+        return out
+
+    @staticmethod
+    def fix_datapoints(known_points, start_time, end_time, step):
+        """
+        points is a list of known points (potentially empty)
+        """
+        datapoints = []
+        steps = int(round((end_time - start_time) * 1.0 / step))
+        # if we have 3 datapoints: at 0, at 60 and 120, then step is 60, steps = 2 and should have 3 points
+        # note that graphite assumes data at quantized intervals, whereas in influx they can be stored at like 07, 67, etc.
+        if len(known_points) == steps + 1:
+            logger.debug("No steps missing")
+            datapoints = [p[2] for p in known_points]
+        else:
+            logger.debug("Fill missing steps with None values")
+            next_point = 0
+            for s in range(0, steps + 1):
+                should_be_near = start_time + step * s
+                # even ininitially when next_point = 0, len(known_points) might be == 0
+                if len(known_points) > next_point and abs(known_points[next_point][0] - should_be_near) <= step / 2:
+                    datapoints.append(known_points[next_point][2])
+                    if next_point + 1 < len(known_points):
+                        next_point += 1
+                else:
+                    datapoints.append(None)
+        return datapoints
 
     def get_intervals(self):
         if self.cheat_times:
@@ -131,7 +156,12 @@ class InfluxdbReader(object):
         return IntervalSet([Interval(first, last)])
 
 
+class InfluxLeafNode(LeafNode):
+    __fetch_multi__ = 'influxdb'
+
+
 class InfluxdbFinder(object):
+    __fetch_multi__ = 'influxdb'
     __slots__ = ('client', 'schemas', 'cache', 'cheat_times')
 
     def __init__(self, config=None):
@@ -159,6 +189,7 @@ class InfluxdbFinder(object):
             raise Exception("series not in cache. please run maintain_cache.py")
 
         seen_branches = set()
+
         for name in series:
             if regex.match(name) is not None:
                 logger.debug("found leaf", name=name)
@@ -167,7 +198,7 @@ class InfluxdbFinder(object):
                     if rule_patt.match(name):
                         res = rule_res
                         break
-                yield LeafNode(name, InfluxdbReader(self.client, name, res, self.cache, self.cheat_times))
+                yield InfluxLeafNode(name, InfluxdbReader(self.client, name, res, self.cache, self.cheat_times))
 
             while '.' in name:
                 name = name.rsplit('.', 1)[0]
@@ -176,3 +207,23 @@ class InfluxdbFinder(object):
                     if regex.match(name) is not None:
                         logger.debug("found branch", name=name)
                         yield BranchNode(name)
+
+    def fetch_multi(self, nodes, start_time, end_time):
+        from pprint import pprint
+        series = ', '.join(['"%s"' % node.path for node in nodes])
+        step = 60  # TODO: this is not ideal in all cases. for one thing, don't hardcode, for another.. how to deal with multiple steps?
+        pprint('HEREWEGO')
+        query = 'select time, value from %s where time > %ds and time < %ds order asc' % (
+                series, start_time, end_time + 1)
+        data = self.client.query(query)
+        pprint(data)
+
+        datapoints = InfluxdbReader.fix_datapoints_multi(data, start_time, end_time, step)
+
+        time_info = start_time, end_time, step
+        logger.debug("influx REQUESTED RANGE %d to %d (both inclusive)" % (
+            start_time, end_time + 1))
+        logger.debug("influx RETURNED  RANGE %d to %d" % (
+            start_time, end_time))
+        print "RETURNING", len(datapoints), "datapoints"  # TODO make sure this is always correct
+        return time_info, datapoints
