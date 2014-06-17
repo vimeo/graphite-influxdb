@@ -61,11 +61,6 @@ class InfluxdbReader(object):
         datapoints = InfluxdbReader.fix_datapoints(known_points, start_time, end_time, self.step)
 
         time_info = start_time, end_time, self.step
-        logger.debug("influx REQUESTED RANGE for %s: %d to %d (both inclusive)" % (
-            self.path, start_time, end_time + 1))
-        logger.debug("influx RETURNED  RANGE for %s: %d to %d" % (
-            self.path, start_time, end_time))
-        print "RETURNING", len(datapoints), "datapoints"  # TODO make sure this is always correct
         return time_info, datapoints
 
     @staticmethod
@@ -212,18 +207,11 @@ class InfluxdbFinder(object):
         from pprint import pprint
         series = ', '.join(['"%s"' % node.path for node in nodes])
         step = 60  # TODO: this is not ideal in all cases. for one thing, don't hardcode, for another.. how to deal with multiple steps?
-        pprint('HEREWEGO')
         query = 'select time, value from %s where time > %ds and time < %ds order asc' % (
                 series, start_time, end_time + 1)
         data = self.client.query(query)
-        pprint(data)
 
         datapoints = InfluxdbReader.fix_datapoints_multi(data, start_time, end_time, step)
 
         time_info = start_time, end_time, step
-        logger.debug("influx REQUESTED RANGE %d to %d (both inclusive)" % (
-            start_time, end_time + 1))
-        logger.debug("influx RETURNED  RANGE %d to %d" % (
-            start_time, end_time))
-        print "RETURNING", len(datapoints), "datapoints"  # TODO make sure this is always correct
         return time_info, datapoints
