@@ -3,14 +3,24 @@ Graphite-InfluxDB
 
 An influxdb backend for Graphite-web (source or 0.10.x) or graphite-api.
 
-Installation
-------------
 
-Run maintain_cache.py, which keeps the cache up to date in a loop
+Install and configure using docker
+----------------------------------
+
+Using docker is an easy way to get graphite-api + graphite-influx up and running.
+See https://github.com/Dieterbe/graphite-api-influxdb-docker
+
+Otherwise, follow instructions below
+
+
+Manual installation
+-------------------
 
 ::
 
     pip install graphite_influxdb
+
+don't forget to run maintain_cache.py, which keeps the cache up to date in a loop
 
 Using with graphite-api
 -----------------------
