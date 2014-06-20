@@ -1,5 +1,6 @@
 # coding: utf-8
 from setuptools import setup
+from glob import glob
 
 setup(
     name='graphite-influxdb',
@@ -23,6 +24,7 @@ setup(
         'Programming Language :: Python :: 2',
         'Topic :: System :: Monitoring',
     ),
+    scripts=glob('bin/*.py'),
     install_requires=(
         'influxdb',
     ),
