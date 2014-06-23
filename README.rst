@@ -10,7 +10,10 @@ Install and configure using docker
 Using docker is an easy way to get graphite-api + graphite-influx up and running.
 See https://github.com/Dieterbe/graphite-api-influxdb-docker
 
-Otherwise, follow instructions below
+Otherwise, follow instructions below.
+Graphite-api is the simplest to setup, though graphite-web might perform better.
+You can use the experimental statsd support in graphite-api to have this backend
+submit performance metrics (not supported with graphite-web)
 
 
 Manual installation

@@ -14,6 +14,25 @@ from influxdb import InfluxDBClient
 logger = structlog.get_logger()
 
 
+def NullStatsd():
+    def timer(self, key):
+        pass
+
+# in case graphite-api doesn't have statsd configured,
+# just use dummy one that doesn't do anything
+# (or if you use graphite-web which just doesn't support statsd)
+try:
+    from graphite_api.app import app
+    statsd = app.statsd
+    assert statsd is not None
+except:
+    statsd = NullStatsd()
+
+# if you want to manually set a statsd client, do this:
+# from statsd import StatsClient
+# statsd = StatsClient("host", 8125)
+
+
 def config_to_client(config=None):
     if config is not None:
         cfg = config.get('influxdb', {})
@@ -50,9 +69,10 @@ class InfluxdbReader(object):
         # from is exclusive (from=foo returns data at ts=foo+1 and higher)
         # until is inclusive (until=bar returns data at ts=bar and lower)
         # influx doesn't support <= and >= yet, hence the add.
-        data = self.client.query('select time, value from "%s" where time > %ds '
-                                 'and time < %ds order asc' % (
-                                     self.path, start_time, end_time + 1))
+        with statsd.timer('service=graphite-api.ext_service=influxdb.target_type=gauge.unit=ms.what=query_individual_duration'):
+            data = self.client.query('select time, value from "%s" where time > %ds '
+                                     'and time < %ds order asc' % (
+                                         self.path, start_time, end_time + 1))
 
         try:
             known_points = data[0]['points']
@@ -115,7 +135,8 @@ class InfluxdbReader(object):
         if first is None:
             print "CACHE MISS", key_first
             q = 'select * from "%s" limit 1 order asc' % self.path
-            first_data = self.client.query(q)
+            with statsd.timer('service=graphite-api.ext_service=influxdb.target_type=gauge.unit=ms.what=query_individual_first_point_duration'):
+                first_data = self.client.query(q)
             first = 0
             valid_res = False
             try:
@@ -134,7 +155,8 @@ class InfluxdbReader(object):
         if last is None:
             print "CACHE MISS", key_last
             q = 'select * from "%s" limit 1' % self.path
-            last_data = self.client.query(q)
+            with statsd.timer('service=graphite-api.ext_service=influxdb.target_type=gauge.unit=ms.what=query_individual_last_point_duration'):
+                last_data = self.client.query(q)
             last = 0
             valid_res = False
             try:
