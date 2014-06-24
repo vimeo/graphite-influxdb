@@ -20,6 +20,8 @@ def findquery_to_cachekey(q):
 def NullStatsd():
     def timer(self, key):
         pass
+    def timing(self, key, val):
+        pass
 
 # in case graphite-api doesn't have statsd configured,
 # just use dummy one that doesn't do anything
@@ -34,6 +36,15 @@ except:
 # if you want to manually set a statsd client, do this:
 # from statsd import StatsClient
 # statsd = StatsClient("host", 8125)
+
+
+def print_time(t=None):
+    """
+    t unix timestamp or None
+    """
+    if t is None:
+        t = time.time()
+    return "%d (%s)" % (t, time.ctime(t))
 
 
 def config_to_client(config=None):
@@ -72,16 +83,21 @@ class InfluxdbReader(object):
         # from is exclusive (from=foo returns data at ts=foo+1 and higher)
         # until is inclusive (until=bar returns data at ts=bar and lower)
         # influx doesn't support <= and >= yet, hence the add.
+        logger.debug(caller="fetch()", start_time=start_time, end_time=end_time, step=self.step, debug_key=self.path)
         with statsd.timer('service=graphite-api.ext_service=influxdb.target_type=gauge.unit=ms.what=query_individual_duration'):
             data = self.client.query('select time, value from "%s" where time > %ds '
                                      'and time < %ds order asc' % (
                                          self.path, start_time, end_time + 1))
 
+        logger.debug(caller="fetch()", returned_data=data, debug_key=self.path)
+
         try:
             known_points = data[0]['points']
         except Exception:
+            logger.debug(caller="fetch()", msg="COULDN'T READ POINTS. SETTING TO EMPTY LIST", debug_key=self.path)
             known_points = []
-        datapoints = InfluxdbReader.fix_datapoints(known_points, start_time, end_time, self.step)
+        logger.debug(caller="fetch()", msg="invoking fix_datapoints()", debug_key=self.path)
+        datapoints = InfluxdbReader.fix_datapoints(known_points, start_time, end_time, self.step, self.path)
 
         time_info = start_time, end_time, self.step
         return time_info, datapoints
@@ -97,24 +113,34 @@ class InfluxdbReader(object):
             ....
         """
         for seriesdata in data:
-            datapoints = InfluxdbReader.fix_datapoints(seriesdata['points'], start_time, end_time, step)
+            logger.debug(caller="fix_datapoints_multi", msg="invoking fix_datapoints()", debug_key=seriesdata['name'])
+            datapoints = InfluxdbReader.fix_datapoints(seriesdata['points'], start_time, end_time, step, seriesdata['name'])
             out[seriesdata['name']] = datapoints
         return out
 
     @staticmethod
-    def fix_datapoints(known_points, start_time, end_time, step):
+    def fix_datapoints(known_points, start_time, end_time, step, debug_key):
         """
         points is a list of known points (potentially empty)
         """
+        logger.debug(caller='fix_datapoints', len_known_points=len(known_points), debug_key=debug_key)
+        if len(known_points) == 1:
+            logger.debug(caller='fix_datapoints', only_known_point=known_points[0], debug_key=debug_key)
+        elif len(known_points) > 1:
+            logger.debug(caller='fix_datapoints', first_known_point=known_points[0], debug_key=debug_key)
+            logger.debug(caller='fix_datapoints', last_known_point=known_points[-1], debug_key=debug_key)
+
         datapoints = []
         steps = int(round((end_time - start_time) * 1.0 / step))
         # if we have 3 datapoints: at 0, at 60 and 120, then step is 60, steps = 2 and should have 3 points
         # note that graphite assumes data at quantized intervals, whereas in influx they can be stored at like 07, 67, etc.
+        ratio = len(known_points) * 1.0 / (steps + 1)
+        statsd.timer('service=graphite-api.target_type=gauge.unit=none.what=known_points/needed_points', ratio)
         if len(known_points) == steps + 1:
-            logger.debug("No steps missing")
+            logger.debug(action="No steps missing", debug_key=debug_key)
             datapoints = [p[2] for p in known_points]
         else:
-            logger.debug("Fill missing steps with None values")
+            logger.debug(action="Fill missing steps with None values", debug_key=debug_key)
             next_point = 0
             for s in range(0, steps + 1):
                 should_be_near = start_time + step * s
@@ -125,18 +151,22 @@ class InfluxdbReader(object):
                         next_point += 1
                 else:
                     datapoints.append(None)
+
+        logger.debug(caller='fix_datapoints', len_datapoints=len(datapoints), debug_key=debug_key)
+        logger.debug(caller='fix_datapoints', first_returned_point=datapoints[0], debug_key=debug_key)
+        logger.debug(caller='fix_datapoints', last_returned_point=datapoints[-1], debug_key=debug_key)
         return datapoints
 
     def get_intervals(self):
         if self.cheat_times:
-            print "cheat_times enabled. this is gonna be quick.."
+            logger.debug(caller='get_intervals', msg="cheat_times enabled. this is gonna be quick..", debug_key=self.path)
             now = int(time.time())
             return IntervalSet([Interval(1, now)])
 
         key_first = "%s_first" % self.path
         first = self.cache.get(key_first)
         if first is None:
-            print "CACHE MISS", key_first
+            logger.debug(caller='get_intervals', cache_miss=key_first, debug_key=self.path)
             q = 'select * from "%s" limit 1 order asc' % self.path
             with statsd.timer('service=graphite-api.ext_service=influxdb.target_type=gauge.unit=ms.what=query_individual_first_point_duration'):
                 first_data = self.client.query(q)
@@ -148,15 +178,15 @@ class InfluxdbReader(object):
             except Exception:
                 pass
             if valid_res:
-                print "updating cache"
+                logger.debug(caller='get_intervals', cache_add=key_first, debug_key=self.path)
                 self.cache.add(key_first, first, timeout=self.step * 1000)
         else:
-            print "CACHE HIT", key_first
+            logger.debug(caller='get_intervals', cache_hit=key_first, debug_key=self.path)
 
         key_last = "%s_last" % self.path
         last = self.cache.get(key_last)
         if last is None:
-            print "CACHE MISS", key_last
+            logger.debug(caller='get_intervals', cache_miss=key_last, debug_key=self.path)
             q = 'select * from "%s" limit 1' % self.path
             with statsd.timer('service=graphite-api.ext_service=influxdb.target_type=gauge.unit=ms.what=query_individual_last_point_duration'):
                 last_data = self.client.query(q)
@@ -168,10 +198,10 @@ class InfluxdbReader(object):
             except Exception:
                 pass
             if valid_res:
-                print "updating cache"
+                logger.debug(caller='get_intervals', cache_add=key_last, debug_key=self.path)
                 self.cache.add(key_last, last, timeout=self.step)
         else:
-            print "CACHE HIT", key_last
+            logger.debug(caller='get_intervals', cache_hit=key_last, debug_key=self.path)
 
         return IntervalSet([Interval(first, last)])
 
@@ -273,18 +303,22 @@ class InfluxdbFinder(object):
                 yield BranchNode(name)
 
     def fetch_multi(self, nodes, start_time, end_time):
-        from pprint import pprint
         series = ', '.join(['"%s"' % node.path for node in nodes])
         step = 60  # TODO: this is not ideal in all cases. for one thing, don't hardcode, for another.. how to deal with multiple steps?
         query = 'select time, value from %s where time > %ds and time < %ds order asc' % (
                 series, start_time, end_time + 1)
+        logger.debug(caller='fetch_multi', query=query)
+        logger.debug(caller='fetch_multi', start_time=print_time(start_time), end_time=print_time(end_time), step=step)
         with statsd.timer('service=graphite-api.ext_service=influxdb.target_type=gauge.unit=ms.action=select_datapoints'):
             data = self.client.query(query)
+        logger.debug(caller='fetch_multi', returned_data=data)
         if not len(data):
             data = [{'name': node.path, 'points': []} for node in nodes]
             logger.debug(caller='fetch_multi', FIXING_DATA_TO=data)
+        logger.debug(caller='fetch_multi', len_datapoints_before_fixing=len(data))
 
         with statsd.timer('service=graphite-api.action=fix_datapoints_multi.target_type=gauge.unit=ms'):
+            logger.debug(caller='fetch_multi', action='invoking fix_datapoints_multi()')
             datapoints = InfluxdbReader.fix_datapoints_multi(data, start_time, end_time, step)
 
         time_info = start_time, end_time, step
