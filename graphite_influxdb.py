@@ -280,6 +280,9 @@ class InfluxdbFinder(object):
                 series, start_time, end_time + 1)
         with statsd.timer('service=graphite-api.ext_service=influxdb.target_type=gauge.unit=ms.action=select_datapoints'):
             data = self.client.query(query)
+        if not len(data):
+            data = [{'name': node.path, 'points': []} for node in nodes]
+            logger.debug(caller='fetch_multi', FIXING_DATA_TO=data)
 
         with statsd.timer('service=graphite-api.action=fix_datapoints_multi.target_type=gauge.unit=ms'):
             datapoints = InfluxdbReader.fix_datapoints_multi(data, start_time, end_time, step)
