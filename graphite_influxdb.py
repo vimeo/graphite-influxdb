@@ -13,6 +13,14 @@ from influxdb import InfluxDBClient
 
 logger = structlog.get_logger()
 
+# uncomment the following block if you suspect that logger output is often not visible for some reason, but printing works, when you ctrl-c gunicorn at least (this is still a mystery to me)
+
+# def debug(*args, **kwargs):
+#    import pprint
+#     pprint.pprint((args, kwargs))
+# logger.debug = debug
+
+
 def findquery_to_cachekey(q):
     return "query '%s'_%s_%s" % (q.pattern, q.startTime, q.endTime)
 
@@ -20,6 +28,7 @@ def findquery_to_cachekey(q):
 def NullStatsd():
     def timer(self, key):
         pass
+
     def timing(self, key, val):
         pass
 
