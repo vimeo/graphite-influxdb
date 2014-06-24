@@ -238,7 +238,7 @@ class InfluxdbFinder(object):
     def assure_series(self):
         if self.series is not None:
             return self.series
-        with statsd.timer('service=graphite-api.action=cache_get_nodes.target_type=gauge.unit=ms.what=query_duration'):
+        with statsd.timer('service=graphite-api.action=cache_get_nodes.target_type=gauge.unit=ms'):
             series = self.cache.get("influxdb_list_series")
             if series is None:
                 raise Exception("series not in cache. please run maintain_cache.py")
