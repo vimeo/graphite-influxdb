@@ -21,10 +21,6 @@ logger = structlog.get_logger()
 # logger.debug = debug
 
 
-def findquery_to_cachekey(q):
-    return "query '%s'_%s_%s" % (q.pattern, q.startTime, q.endTime)
-
-
 def NullStatsd():
     def timer(self, key):
         pass
@@ -257,7 +253,7 @@ class InfluxdbFinder(object):
         return regex
 
     def get_leaves(self, query):
-        key_leaves = "%s_leaves" % findquery_to_cachekey(query)
+        key_leaves = "%s_leaves" % query.pattern
         with statsd.timer('service=graphite-api.action=cache_get_leaves.target_type=gauge.unit=ms'):
             data = self.cache.get(key_leaves)
         if data is not None:
@@ -282,7 +278,7 @@ class InfluxdbFinder(object):
 
     def get_branches(self, query):
         seen_branches = set()
-        key_branches = "%s_branches" % findquery_to_cachekey(query)
+        key_branches = "%s_branches" % query.pattern
         with statsd.timer('service=graphite-api.action=cache_get_branches.target_type=gauge.unit=ms'):
             data = self.cache.get(key_branches)
         if data is not None:
