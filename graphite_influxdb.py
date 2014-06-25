@@ -217,7 +217,7 @@ class InfluxLeafNode(LeafNode):
 
 class InfluxdbFinder(object):
     __fetch_multi__ = 'influxdb'
-    __slots__ = ('client', 'schemas', 'cache', 'cheat_times', 'series')
+    __slots__ = ('client', 'schemas', 'cache', 'cheat_times')
 
     def __init__(self, config=None):
         from graphite_api.app import app
@@ -229,19 +229,35 @@ class InfluxdbFinder(object):
         # for now we assume we don't do continuous queries yet, and have only one resolution per match-string
         # for now, edit your settings here, TODO make this properly configurable or have it stored in influx and query influx
         self.schemas = [(re.compile(''), 60)]
-        self.series = None
 
-    def assure_series(self):
-        if self.series is not None:
-            return self.series
+    def assure_series(self, query):
+
+        regex = self.compile_regex(query)
+
+        key_series = "%s_series" % query.pattern
+        with statsd.timer('service=graphite-api.action=cache_get_series.target_type=gauge.unit=ms'):
+            series = self.cache.get(key_series)
+        if series is not None:
+            return series, regex
+
+        # if not in cache, generate from scratch :(
+        # first we must load the list with all nodes
         with statsd.timer('service=graphite-api.action=cache_get_nodes.target_type=gauge.unit=ms'):
-            series = self.cache.get("influxdb_list_series")
-            if series is None:
+            nodes = self.cache.get("influxdb_list_series")
+            if nodes is None:
                 raise Exception("series not in cache. please run maintain_cache.py")
-        self.series = series
-        return series
 
-    def assure_regex(self, query):
+        # and then build the sublist of all matching ones
+        with statsd.timer('service=graphite-api.action=find_series.target_type=gauge.unit=ms'):
+            series = [name for name in nodes if regex.match(name) is not None]
+
+        # store in cache
+        with statsd.timer('service=graphite-api.action=cache_set_series.target_type=gauge.unit=ms'):
+            self.cache.add(key_series, series, timeout=300)
+
+        return series, regex
+
+    def compile_regex(self, query):
         # query.pattern is basically regex, though * should become [^\.]+
         # and . \.
         # but list series doesn't support pattern matching/regex yet
@@ -258,20 +274,18 @@ class InfluxdbFinder(object):
             data = self.cache.get(key_leaves)
         if data is not None:
             return data
-        series = self.assure_series()
-        regex = self.assure_regex(query)
+        series, regex = self.assure_series(query)
         logger.debug(caller="get_leaves", key=key_leaves)
         leaves = []
         with statsd.timer('service=graphite-api.action=find_leaves.target_type=gauge.unit=ms'):
             for name in series:
-                if regex.match(name) is not None:
-                    logger.debug("found leaf", name=name)
-                    res = 10
-                    for (rule_patt, rule_res) in self.schemas:
-                        if rule_patt.match(name):
-                            res = rule_res
-                            break
-                    leaves.append([name, res])
+                logger.debug("found leaf", name=name)
+                res = 10
+                for (rule_patt, rule_res) in self.schemas:
+                    if rule_patt.match(name):
+                        res = rule_res
+                        break
+                leaves.append([name, res])
         with statsd.timer('service=graphite-api.action=cache_set_leaves.target_type=gauge.unit=ms'):
             self.cache.add(key_leaves, leaves, timeout=300)
         return leaves
@@ -283,8 +297,7 @@ class InfluxdbFinder(object):
             data = self.cache.get(key_branches)
         if data is not None:
             return data
-        series = self.assure_series()
-        regex = self.assure_regex(query)
+        series, regex = self.assure_series(query)
         logger.debug(caller="get_branches", key=key_branches)
         branches = []
         with statsd.timer('service=graphite-api.action=find_branches.target_type=gauge.unit=ms'):
