@@ -21,12 +21,13 @@ logger = structlog.get_logger()
 # logger.debug = debug
 
 
-def NullStatsd():
-    def timer(self, key):
+class NullStatsd():
+    def timer(self, key, val=None):
         pass
 
     def timing(self, key, val):
         pass
+
 
 # in case graphite-api doesn't have statsd configured,
 # just use dummy one that doesn't do anything
