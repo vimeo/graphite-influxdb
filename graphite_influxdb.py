@@ -240,8 +240,12 @@ class InfluxdbFinder(object):
     __slots__ = ('client', 'schemas', 'cache', 'cheat_times')
 
     def __init__(self, config=None):
-        from graphite_api.app import app
-        self.cache = app.cache
+        try:
+            from graphite_api.app import app
+            self.cache = app.cache
+        except:
+            from django.core.cache import cache
+            self.cache = cache
 
         self.client, self.cheat_times = config_to_client(config)
         # we basically need to replicate /etc/carbon/storage-schemas.conf here
