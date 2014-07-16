@@ -44,6 +44,7 @@ except:
 # statsd = StatsClient("host", 8125)
 
 
+
 def print_time(t=None):
     """
     t unix timestamp or None
@@ -142,23 +143,41 @@ class InfluxdbReader(object):
         # note that graphite assumes data at quantized intervals, whereas in influx they can be stored at like 07, 67, etc.
         ratio = len(known_points) * 1.0 / (steps + 1)
         statsd.timer('service=graphite-api.target_type=gauge.unit=none.what=known_points/needed_points', ratio)
+
         if len(known_points) == steps + 1:
             logger.debug(action="No steps missing", debug_key=debug_key)
             datapoints = [p[2] for p in known_points]
         else:
-            logger.debug(action="Fill missing steps with None values", debug_key=debug_key)
+            amount = steps + 1 - len(known_points)
+            logger.debug(action="Fill missing steps with None values", amount=amount, debug_key=debug_key)
             next_point = 0
             for s in range(0, steps + 1):
-                should_be_near = start_time + step * s
+                # if we have no more known points, fill with None's
                 # even ininitially when next_point = 0, len(known_points) might be == 0
-                if len(known_points) > next_point and abs(known_points[next_point][0] - should_be_near) <= step / 2:
+                if next_point >= len(known_points):
+                    datapoints.append(None)
+                    continue
+
+                # if points are not evenly spaced. i.e. they should be a minute apart but sometimes they are 55 or 65 seconds,
+                # and if they are all about step/2 away from the target timestamps, then sometimes a target point has 2 candidates, and
+                # sometimes 0. So a point might be more than step/2 older.  in that case, since points are sorted, we can just forward the pointer
+                # influxdb's fill(null) will make this cleaner and stop us from having to worry about this.
+
+                should_be_near = start_time + step * s
+                diff = known_points[next_point][0] - should_be_near
+                while next_point + 1 < len(known_points) and diff < (step / 2) * -1:
+                    next_point += 1
+                    diff = known_points[next_point][0] - should_be_near
+
+                # use this point if it's within step/2 from our target
+                if abs(diff) <= step / 2:
                     datapoints.append(known_points[next_point][2])
-                    if next_point + 1 < len(known_points):
-                        next_point += 1
+                    next_point += 1  # note: might go out of bounds, which we use as signal
+
                 else:
                     datapoints.append(None)
 
-        logger.debug(caller='fix_datapoints', len_datapoints=len(datapoints), debug_key=debug_key)
+        logger.debug(caller='fix_datapoints', len_known_points=len(known_points), len_datapoints=len(datapoints), debug_key=debug_key)
         logger.debug(caller='fix_datapoints', first_returned_point=datapoints[0], debug_key=debug_key)
         logger.debug(caller='fix_datapoints', last_returned_point=datapoints[-1], debug_key=debug_key)
         return datapoints
