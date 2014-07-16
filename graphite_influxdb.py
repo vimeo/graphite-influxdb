@@ -278,11 +278,11 @@ class InfluxdbFinder(object):
         return series, regex
 
     def compile_regex(self, query):
-        # query.pattern is basically regex, though * should become [^\.]+
+        # query.pattern is basically regex, though * should become [^\.]*
         # and . \.
         # but list series doesn't support pattern matching/regex yet
         regex = '^{0}$'.format(
-            query.pattern.replace('.', '\.').replace('*', '[^\.]+')
+            query.pattern.replace('.', '\.').replace('*', '[^\.]*')
         )
         logger.debug("searching for nodes", pattern=query.pattern, regex=regex)
         regex = re.compile(regex)
