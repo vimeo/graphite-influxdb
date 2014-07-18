@@ -28,6 +28,9 @@ don't forget to run maintain_cache.py, which keeps the cache up to date in a loo
 Using with graphite-api
 -----------------------
 
+You need the patched version from https://github.com/brutasse/graphite-api/pull/36
+This adds support for caching, statsd instrumentation, and graphite-style templates
+
 In your graphite-api config file::
 
     finders:
