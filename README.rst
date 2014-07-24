@@ -1,7 +1,7 @@
 Graphite-InfluxDB
 =================
 
-An influxdb backend for Graphite-web (source or 0.10.x) or graphite-api.
+An influxdb (0.8-rc3 or higher) backend for Graphite-web (source or 0.10.x) or graphite-api.
 
 
 Install and configure using docker

@@ -81,7 +81,7 @@ while True:
     print section
     start = time.time()
 
-    series_list = [l['name'] for l in series]
+    series_list = [p[1] for p in series[0]['points']]
     from sys import getsizeof
     print "size of series data", getsizeof(series)
     print "size of series list", getsizeof(series_list)
