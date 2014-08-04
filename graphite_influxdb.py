@@ -29,7 +29,7 @@ class NullStatsd():
         pass
 
     def timer(self, key, val=None):
-        pass
+        return self
 
     def timing(self, key, val):
         pass
