@@ -261,14 +261,13 @@ class InfluxdbFinder(object):
         self.schemas = [(re.compile(''), 60)]
 
     def assure_series(self, query):
-
-        regex = self.compile_regex(query)
+        regex = self.compile_regex(query, True)
 
         key_series = "%s_series" % query.pattern
         with statsd.timer('service=graphite-api.action=cache_get_series.target_type=gauge.unit=ms'):
             series = self.cache.get(key_series)
         if series is not None:
-            return series, regex
+            return series
 
         # if not in cache, generate from scratch :(
         # first we must load the list with all nodes
@@ -284,14 +283,18 @@ class InfluxdbFinder(object):
         # store in cache
         with statsd.timer('service=graphite-api.action=cache_set_series.target_type=gauge.unit=ms'):
             self.cache.add(key_series, series, timeout=300)
+        return series
 
-        return series, regex
-
-    def compile_regex(self, query):
+    def compile_regex(self, query, series=False):
         # query.pattern is basically regex, though * should become [^\.]*
         # and . \.
         # but list series doesn't support pattern matching/regex yet
-        regex = '^{0}$'.format(
+        if series:
+            regex = '^{0}'
+        else:
+            regex = '^{0}$'
+
+        regex = regex.format(
             query.pattern.replace('.', '\.').replace('*', '[^\.]*')
         )
         logger.debug("searching for nodes", pattern=query.pattern, regex=regex)
@@ -304,18 +307,20 @@ class InfluxdbFinder(object):
             data = self.cache.get(key_leaves)
         if data is not None:
             return data
-        series, regex = self.assure_series(query)
+        series = self.assure_series(query)
+        regex = self.compile_regex(query)
         logger.debug(caller="get_leaves", key=key_leaves)
         leaves = []
         with statsd.timer('service=graphite-api.action=find_leaves.target_type=gauge.unit=ms'):
             for name in series:
-                logger.debug("found leaf", name=name)
-                res = 10
-                for (rule_patt, rule_res) in self.schemas:
-                    if rule_patt.match(name):
-                        res = rule_res
-                        break
-                leaves.append([name, res])
+                if regex.match(name) is not None:
+                    logger.debug("found leaf", name=name)
+                    res = 10
+                    for (rule_patt, rule_res) in self.schemas:
+                        if rule_patt.match(name):
+                            res = rule_res
+                            break
+                    leaves.append([name, res])
         with statsd.timer('service=graphite-api.action=cache_set_leaves.target_type=gauge.unit=ms'):
             self.cache.add(key_leaves, leaves, timeout=300)
         return leaves
@@ -327,7 +332,8 @@ class InfluxdbFinder(object):
             data = self.cache.get(key_branches)
         if data is not None:
             return data
-        series, regex = self.assure_series(query)
+        series = self.assure_series(query)
+        regex = self.compile_regex(query)
         logger.debug(caller="get_branches", key=key_branches)
         branches = []
         with statsd.timer('service=graphite-api.action=find_branches.target_type=gauge.unit=ms'):
