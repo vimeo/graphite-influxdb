@@ -4,7 +4,7 @@ from glob import glob
 
 setup(
     name='graphite-influxdb',
-    version='0.2',
+    version='0.3',
     url='https://github.com/vimeo/graphite-influxdb',
     license='apache2',
     author='Dieter Plaetinck',
