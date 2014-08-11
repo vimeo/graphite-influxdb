@@ -59,7 +59,11 @@ client = InfluxDBClient(host, port, user, passw, db)
 if config['cache']['CACHE_TYPE'] == 'memcached':
     cache = MemcachedCache(key_prefix=config['cache']['CACHE_KEY_PREFIX'])
 elif config['cache']['CACHE_TYPE'] == 'filesystem':
-    cache = FileSystemCache(config['cache']['CACHE_DIR'])
+    from os import listdir
+    from os.path import isfile, join
+    cache_dir = "%s_tmp" % config['cache']['CACHE_DIR']
+    cache_dir_real = config['cache']['CACHE_DIR']
+    cache = FileSystemCache(cache_dir)
 else:
     raise Exception("unsupported cache backend")
 
@@ -96,26 +100,39 @@ while True:
     cache.set("influxdb_list_series", series_list, 60 * 20)
     duration(section, start)
 
-
     if cfg.get('cheat_times'):
         print "cheating on start/end time. no further influx queries needed..."
-        continue
+    else:
+        section = "influxdb:: select * from // order asc limit 1"
+        print section
+        start = time.time()
+        series = client.query("select * from // order asc limit 1")
+        duration(section, start)
 
-    section = "influxdb:: select * from // order asc limit 1"
-    print section
-    start = time.time()
-    series = client.query("select * from // order asc limit 1")
-    duration(section, start)
+        section = "cache:: store first-point for all series"
+        print section
+        start = time.time()
 
+        for series_info in series:
+            name = series_info['name']
+            key_first = "%s_first" % name
+            cache.set(key_first, series_info['points'][0][0], timeout=60 * 20)
 
-    section = "cache:: store first-point for all series"
-    print section
-    start = time.time()
+        duration(section, start)
 
-    for series_info in series:
-        name = series_info['name']
-        key_first = "%s_first" % name
-        cache.set(key_first, series_info['points'][0][0], timeout=60 * 20)
+    if config['cache']['CACHE_TYPE'] == 'filesystem':
+        # the filesystemcache is not atomic, so we have to do renames from a tmp dir to make it atomic
+        section = "cache:: atomic replace"
+        print section
+        start = time.time()
 
-    duration(section, start)
+        for base in listdir(cache_dir):
+            print "huh", base
+            path = join(cache_dir, base)
+            if isfile(path):
+                print "renaming", path, join(cache_dir_real, base)
+                os.rename(path, join(cache_dir_real, base))
+
+        duration(section, start)
+
     duration("ENTIRE LOOP", start_loop)
