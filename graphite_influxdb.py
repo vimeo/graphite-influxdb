@@ -67,7 +67,6 @@ def config_to_client(config=None):
         user = cfg.get('user', 'graphite')
         passw = cfg.get('pass', 'graphite')
         db = cfg.get('db', 'graphite')
-        cheat_times = cfg.get('cheat_times', False)
     else:
         from django.conf import settings
         host = getattr(settings, 'INFLUXDB_HOST', 'localhost')
@@ -75,20 +74,18 @@ def config_to_client(config=None):
         user = getattr(settings, 'INFLUXDB_USER', 'graphite')
         passw = getattr(settings, 'INFLUXDB_PASS', 'graphite')
         db = getattr(settings, 'INFLUXDB_DB', 'graphite')
-        cheat_times = getattr(settings, 'INFLUXDB_CHEAT_TIMES', False)
 
-    return InfluxDBClient(host, port, user, passw, db), cheat_times
+    return InfluxDBClient(host, port, user, passw, db)
 
 
 class InfluxdbReader(object):
-    __slots__ = ('client', 'path', 'step', 'cache', 'cheat_times')
+    __slots__ = ('client', 'path', 'step', 'cache')
 
-    def __init__(self, client, path, step, cache, cheat_times):
+    def __init__(self, client, path, step, cache):
         self.client = client
         self.path = path
         self.step = step
         self.cache = cache
-        self.cheat_times = cheat_times
 
     def fetch(self, start_time, end_time):
         # in graphite,
@@ -188,52 +185,8 @@ class InfluxdbReader(object):
         return datapoints
 
     def get_intervals(self):
-        if self.cheat_times:
-            logger.debug(caller='get_intervals', msg="cheat_times enabled. this is gonna be quick..", debug_key=self.path)
             now = int(time.time())
             return IntervalSet([Interval(1, now)])
-
-        key_first = "%s_first" % self.path
-        first = self.cache.get(key_first)
-        if first is None:
-            logger.debug(caller='get_intervals', cache_miss=key_first, debug_key=self.path)
-            q = 'select * from "%s" limit 1 order asc' % self.path
-            with statsd.timer('service=graphite-api.ext_service=influxdb.target_type=gauge.unit=ms.what=query_individual_first_point_duration'):
-                first_data = self.client.query(q)
-            first = 0
-            valid_res = False
-            try:
-                first = first_data[0]['points'][0][0]
-                valid_res = True
-            except Exception:
-                pass
-            if valid_res:
-                logger.debug(caller='get_intervals', cache_add=key_first, debug_key=self.path)
-                self.cache.add(key_first, first, timeout=self.step * 1000)
-        else:
-            logger.debug(caller='get_intervals', cache_hit=key_first, debug_key=self.path)
-
-        key_last = "%s_last" % self.path
-        last = self.cache.get(key_last)
-        if last is None:
-            logger.debug(caller='get_intervals', cache_miss=key_last, debug_key=self.path)
-            q = 'select * from "%s" limit 1' % self.path
-            with statsd.timer('service=graphite-api.ext_service=influxdb.target_type=gauge.unit=ms.what=query_individual_last_point_duration'):
-                last_data = self.client.query(q)
-            last = 0
-            valid_res = False
-            try:
-                last = last_data[0]['points'][0][0]
-                valid_res = True
-            except Exception:
-                pass
-            if valid_res:
-                logger.debug(caller='get_intervals', cache_add=key_last, debug_key=self.path)
-                self.cache.add(key_last, last, timeout=self.step)
-        else:
-            logger.debug(caller='get_intervals', cache_hit=key_last, debug_key=self.path)
-
-        return IntervalSet([Interval(first, last)])
 
 
 class InfluxLeafNode(LeafNode):
@@ -242,7 +195,7 @@ class InfluxLeafNode(LeafNode):
 
 class InfluxdbFinder(object):
     __fetch_multi__ = 'influxdb'
-    __slots__ = ('client', 'schemas', 'cache', 'cheat_times')
+    __slots__ = ('client', 'schemas', 'cache')
 
     def __init__(self, config=None):
         try:
@@ -252,7 +205,7 @@ class InfluxdbFinder(object):
             from django.core.cache import cache
             self.cache = cache
 
-        self.client, self.cheat_times = config_to_client(config)
+        self.client = config_to_client(config)
         # we basically need to replicate /etc/carbon/storage-schemas.conf here
         # so that for a given series name, and given from/to, we know the corresponding steps in influx
         # for now we assume we don't do continuous queries yet, and have only one resolution per match-string
@@ -340,7 +293,7 @@ class InfluxdbFinder(object):
     def find_nodes(self, query):
         with statsd.timer('service=graphite-api.action=yield_nodes.target_type=gauge.unit=ms.what=query_duration'):
             for (name, res) in self.get_leaves(query):
-                yield InfluxLeafNode(name, InfluxdbReader(self.client, name, res, self.cache, self.cheat_times))
+                yield InfluxLeafNode(name, InfluxdbReader(self.client, name, res, self.cache))
             for name in self.get_branches(query):
                 yield BranchNode(name)
 
