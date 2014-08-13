@@ -23,8 +23,6 @@ Manual installation
 
     pip install graphite_influxdb
 
-don't forget to run maintain_cache.py, which keeps the cache up to date in a loop
-
 Using with graphite-api
 -----------------------
 

@@ -50,7 +50,6 @@ except:
 # statsd = StatsClient("host", 8125)
 
 
-
 def print_time(t=None):
     """
     t unix timestamp or None
@@ -270,16 +269,11 @@ class InfluxdbFinder(object):
         if series is not None:
             return series, regex
 
-        # if not in cache, generate from scratch :(
+        # if not in cache, generate from scratch
         # first we must load the list with all nodes
-        with statsd.timer('service=graphite-api.action=cache_get_nodes.target_type=gauge.unit=ms'):
-            nodes = self.cache.get("influxdb_list_series")
-            if nodes is None:
-                raise Exception("series not in cache. please run maintain_cache.py")
-
-        # and then build the sublist of all matching ones
-        with statsd.timer('service=graphite-api.action=find_series.target_type=gauge.unit=ms'):
-            series = [name for name in nodes if regex.match(name) is not None]
+        with statsd.timer('service=graphite-api.ext_service=influxdb.target_type=gauge.unit=ms.action=get_series'):
+            ret = self.client.query("list series /%s/" % regex.pattern)
+            series = [serie[1] for serie in ret[0]['points']]
 
         # store in cache
         with statsd.timer('service=graphite-api.action=cache_set_series.target_type=gauge.unit=ms'):
