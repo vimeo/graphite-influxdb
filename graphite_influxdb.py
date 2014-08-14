@@ -225,7 +225,8 @@ class InfluxdbFinder(object):
         # first we must load the list with all nodes
         with statsd.timer('service=graphite-api.ext_service=influxdb.target_type=gauge.unit=ms.action=get_series'):
             ret = self.client.query("list series /%s/" % regex.pattern)
-            series = [serie[1] for serie in ret[0]['points']]
+            # as long as influxdb doesn't have good safeguards against series with bad data in the metric names, we must filter out like so:
+            series = [serie[1] for serie in ret[0]['points'] if serie[1].encode('ascii', 'ignore') == serie[1]]
 
         # store in cache
         with statsd.timer('service=graphite-api.action=cache_set_series.target_type=gauge.unit=ms'):
