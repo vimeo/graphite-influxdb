@@ -230,9 +230,10 @@ class InfluxdbFinder(object):
         return series
 
     def compile_regex(self, query, series=False):
-        # query.pattern is basically regex, though * should become [^\.]*
-        # and . \.
-        # but list series doesn't support pattern matching/regex yet
+        # we turn graphite's custom glob-like thing into a regex, like so:
+        # * becomes [^\.]*
+        # . becomes \.
+
         if series:
             regex = '^{0}'
         else:
@@ -242,8 +243,7 @@ class InfluxdbFinder(object):
             query.pattern.replace('.', '\.').replace('*', '[^\.]*')
         )
         logger.debug("searching for nodes", pattern=query.pattern, regex=regex)
-        regex = re.compile(regex)
-        return regex
+        return re.compile(regex)
 
     def get_leaves(self, query):
         key_leaves = "%s_leaves" % query.pattern
@@ -294,6 +294,7 @@ class InfluxdbFinder(object):
         return branches
 
     def find_nodes(self, query):
+        # TODO: once we can query influx better for retention periods, honor the start/end time in the FindQuery object
         with statsd.timer('service=graphite-api.action=yield_nodes.target_type=gauge.unit=ms.what=query_duration'):
             for (name, res) in self.get_leaves(query):
                 yield InfluxLeafNode(name, InfluxdbReader(self.client, name, res, self.cache))
