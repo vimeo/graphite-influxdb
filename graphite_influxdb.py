@@ -206,11 +206,7 @@ class InfluxdbFinder(object):
             self.cache = cache
 
         self.client = config_to_client(config)
-        # we basically need to replicate /etc/carbon/storage-schemas.conf here
-        # so that for a given series name, and given from/to, we know the corresponding steps in influx
-        # for now we assume we don't do continuous queries yet, and have only one resolution per match-string
-        # for now, edit your settings here, TODO make this properly configurable or have it stored in influx and query influx
-        self.schemas = [(re.compile(''), 60)]
+        self.schemas = [(re.compile(patt), step) for (patt, step) in config['influxdb']['schema']]
 
     def assure_series(self, query):
         regex = self.compile_regex(query, True)
@@ -263,7 +259,7 @@ class InfluxdbFinder(object):
             for name in series:
                 if regex.match(name) is not None:
                     logger.debug("found leaf", name=name)
-                    res = 10
+                    res = 60  # fallback default
                     for (rule_patt, rule_res) in self.schemas:
                         if rule_patt.match(name):
                             res = rule_res
@@ -306,7 +302,10 @@ class InfluxdbFinder(object):
 
     def fetch_multi(self, nodes, start_time, end_time):
         series = ', '.join(['"%s"' % node.path for node in nodes])
-        step = 60  # TODO: this is not ideal in all cases. for one thing, don't hardcode, for another.. how to deal with multiple steps?
+        # use the step of the node that is the most coarse
+        # not sure if there's a batter way? can we combine series with different steps (and use the optimal step for each?)
+        # probably not
+        step = max([node.reader.step for node in nodes])
         query = 'select time, value from %s where time > %ds and time < %ds order asc' % (
                 series, start_time, end_time + 1)
         logger.debug(caller='fetch_multi', query=query)
