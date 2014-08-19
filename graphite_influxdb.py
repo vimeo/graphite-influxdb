@@ -59,23 +59,25 @@ def print_time(t=None):
     return "%d (%s)" % (t, time.ctime(t))
 
 
-def config_to_client(config=None):
+def normalize_config(config=None):
+    ret = {}
     if config is not None:
         cfg = config.get('influxdb', {})
-        host = cfg.get('host', 'localhost')
-        port = cfg.get('port', 8086)
-        user = cfg.get('user', 'graphite')
-        passw = cfg.get('pass', 'graphite')
-        db = cfg.get('db', 'graphite')
+        ret['host'] = cfg.get('host', 'localhost')
+        ret['port'] = cfg.get('port', 8086)
+        ret['user'] = cfg.get('user', 'graphite')
+        ret['passw'] = cfg.get('pass', 'graphite')
+        ret['db'] = cfg.get('db', 'graphite')
+        ret['schema'] = cfg.get('schema', [])
     else:
         from django.conf import settings
-        host = getattr(settings, 'INFLUXDB_HOST', 'localhost')
-        port = getattr(settings, 'INFLUXDB_PORT', 8086)
-        user = getattr(settings, 'INFLUXDB_USER', 'graphite')
-        passw = getattr(settings, 'INFLUXDB_PASS', 'graphite')
-        db = getattr(settings, 'INFLUXDB_DB', 'graphite')
-
-    return InfluxDBClient(host, port, user, passw, db)
+        ret['host'] = getattr(settings, 'INFLUXDB_HOST', 'localhost')
+        ret['port'] = getattr(settings, 'INFLUXDB_PORT', 8086)
+        ret['user'] = getattr(settings, 'INFLUXDB_USER', 'graphite')
+        ret['passw'] = getattr(settings, 'INFLUXDB_PASS', 'graphite')
+        ret['db'] = getattr(settings, 'INFLUXDB_DB', 'graphite')
+        ret['schema'] = getattr(settings, 'INFLUXDB_SCHEMA', [])
+    return ret
 
 
 class InfluxdbReader(object):
@@ -205,8 +207,9 @@ class InfluxdbFinder(object):
             from django.core.cache import cache
             self.cache = cache
 
-        self.client = config_to_client(config)
-        self.schemas = [(re.compile(patt), step) for (patt, step) in config['influxdb']['schema']]
+        config = normalize_config(config)
+        self.client = InfluxDBClient(config['host'], config['port'], config['user'], config['passw'], config['db'])
+        self.schemas = [(re.compile(patt), step) for (patt, step) in config['schema']]
 
     def assure_series(self, query):
         regex = self.compile_regex(query, True)
