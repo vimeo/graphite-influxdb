@@ -1,23 +1,44 @@
 import re
-import structlog
 import time
 
+# graphite-api and graphite-web have different logging systems
 try:
     from graphite_api.intervals import Interval, IntervalSet
     from graphite_api.node import LeafNode, BranchNode
+    import structlog
+    logger = structlog.get_logger()
 except ImportError:
     from graphite.intervals import Interval, IntervalSet
     from graphite.node import LeafNode, BranchNode
+    from graphite.logger import log
+    import logging
+
+    class StructlogCompat(object):
+        def __init__(self):
+            log.debugLogger = logging.getLogger("debug")
+
+        @staticmethod
+        def debug(*args, **kwargs):
+            if not log.infoLogger.isEnabledFor(logging.DEBUG):
+                return
+
+            args_list = []
+            for arg in args:
+                args_list.append(arg)
+            for key, value in kwargs.iteritems():
+                args_list.append(key + '=' + str(value))
+            return log.infoLogger.debug(' '.join(args_list))
+    logger = StructlogCompat()
+# uncomment following to enable debugging logger
+#    log.infoLogger.setLevel(logging.DEBUG)
 
 from influxdb import InfluxDBClient
-
-logger = structlog.get_logger()
 
 # uncomment the following block if you suspect that logger output is often not visible for some reason, but printing works, when you ctrl-c gunicorn at least (this is still a mystery to me)
 
 # def debug(*args, **kwargs):
 #    import pprint
-#     pprint.pprint((args, kwargs))
+#    pprint.pprint((args, kwargs))
 # logger.debug = debug
 
 
