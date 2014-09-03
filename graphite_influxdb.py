@@ -264,7 +264,7 @@ class InfluxdbFinder(object):
             regex = '^{0}$'
 
         regex = regex.format(
-            query.pattern.replace('.', '\.').replace('*', '[^\.]*')
+            query.pattern.replace('.', '\.').replace('*', '[^\.]*').replace('{', '(').replace(',', '|').replace('}', ')')
         )
         logger.debug("searching for nodes", pattern=query.pattern, regex=regex)
         return re.compile(regex)
