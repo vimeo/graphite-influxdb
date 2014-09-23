@@ -40,7 +40,7 @@ will just show up as nulls anyway)
 Using with graphite-api
 -----------------------
 
-You need the patched version from https://github.com/brutasse/graphite-api/pull/36
+You need the patched version from https://github.com/Dieterbe/graphite-api/tarball/support-templates2
 This adds support for caching, statsd instrumentation, and graphite-style templates
 
 In your graphite-api config file::
