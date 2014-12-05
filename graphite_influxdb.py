@@ -268,7 +268,6 @@ class InfluxdbFinder(object):
 
     def assure_series(self, query):
         regex = self.compile_regex(query, True)
-
         key_series = "%s_series" % query.pattern
         with statsd.timer('service=graphite-api.action=cache_get_series.target_type=gauge.unit=ms'):
             series = self.cache.get(key_series)
@@ -293,16 +292,14 @@ class InfluxdbFinder(object):
 
     def compile_regex(self, query, series=False):
         """Turn wildcard queries into compiled regex
-        * becomes .+
+        * becomes .*
         . becomes \."""
-
-        if series:
-            regex = '^{0}'
-        else:
-            regex = '^{0}$'
+        regex = '^{0}'
+        if not series:
+            regex += '$'
 
         regex = regex.format(
-            query.pattern.replace('.', '\.').replace('*', '.+').replace(
+            query.pattern.replace('.', '\.').replace('*', '[^\.]*').replace(
                 '{', '(').replace(',', '|').replace('}', ')')
         )
         logger.debug("searching for nodes - %s - %s", query.pattern, regex)
@@ -336,19 +333,28 @@ class InfluxdbFinder(object):
         return leaves
 
     def get_branches(self, query):
+        seen_branches = set()
         key_branches = "%s_branches" % query.pattern
         with statsd.timer('service=graphite-api.action=cache_get_branches.target_type=gauge.unit=ms'):
             data = self.cache.get(key_branches)
         if data is not None:
             return data
+        # Very inefficient call to list
         series = self.assure_series(query)
         regex = self.compile_regex(query)
         logger.debug("get_branches %s", key_branches)
         timer = statsd.timer('service=graphite-api.action=find_branches.target_type=gauge.unit=ms')
         start_time = datetime.datetime.now()
         timer.start()
-        branches = [name for name in series
-                    if regex.match(name)]
+        branches = []
+        for name in series:
+            while '.' in name:
+                name = name.rsplit('.', 1)[0]
+                if name not in seen_branches:
+                    seen_branches.add(name)
+                    if regex.match(name) is not None:
+                        logger.debug("found branch name: %s", name)
+                        branches.append(name)
         timer.stop()
         end_time = datetime.datetime.now()
         dt = end_time - start_time
@@ -374,7 +380,6 @@ class InfluxdbFinder(object):
         # not sure if there's a better way? can we combine series
         # with different steps (and use the optimal step for each?)
         # probably not
-        # import ipdb; ipdb.set_trace()
         step = max([node.reader.step for node in nodes])
         query = 'select time, value from %s where time > %ds and time < %ds order asc' % (
                 series, start_time, end_time + 1)
