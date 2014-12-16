@@ -63,8 +63,8 @@ Also enable the cache. memcache doesn't seem to work well because the list of se
 filesystem seems to work well::
 
     cache:
-        CACHE_TYPE: 'filesystem'
-        CACHE_DIR: '/tmp/graphite-api-cache'
+        type: 'filesystem'
+        dir: '/tmp/graphite-api-cache'
 
 
 Using with graphite-web
