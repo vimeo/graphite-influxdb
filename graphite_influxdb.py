@@ -90,7 +90,7 @@ def normalize_config(config=None):
         ret['passw'] = cfg.get('pass', 'graphite')
         ret['db'] = cfg.get('db', 'graphite')
         ssl = cfg.get('ssl', False)
-        ret['ssl'] = True if ssl == 'true' else False
+        ret['ssl'] = (ssl == 'true')
         ret['schema'] = cfg.get('schema', [])
     else:
         from django.conf import settings
@@ -100,7 +100,7 @@ def normalize_config(config=None):
         ret['passw'] = getattr(settings, 'INFLUXDB_PASS', 'graphite')
         ret['db'] = getattr(settings, 'INFLUXDB_DB', 'graphite')
         ssl = getattr(settings, 'INFLUXDB_SSL', False)
-        ret['ssl'] = True if ssl == 'true' else False
+        ret['ssl'] = (ssl == 'true')
         ret['schema'] = getattr(settings, 'INFLUXDB_SCHEMA', [])
     return ret
 
