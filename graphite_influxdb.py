@@ -49,7 +49,7 @@ class FakeCache(object):
     def add(self, *args, **kwargs):
         pass
 
-
+_CACHE = None
 try:
     from graphite_api.app import app
 except ImportError:
@@ -132,19 +132,19 @@ class InfluxdbReader(object):
         # from is exclusive (from=foo returns data at ts=foo+1 and higher)
         # until is inclusive (until=bar returns data at ts=bar and lower)
         # influx doesn't support <= and >= yet, hence the add.
-        # logger.debug(caller="fetch()", start_time=start_time, end_time=end_time, step=self.step, debug_key=self.path)
+        logger.debug(caller="fetch()", start_time=start_time, end_time=end_time, step=self.step, debug_key=self.path)
         with statsd.timer('service=graphite-api.ext_service=influxdb.target_type=gauge.unit=ms.what=query_individual_duration'):
             _query = 'select time, value from "%s" where time > %ds and time < %ds order asc' % (
                 self.path, start_time, end_time + 1)
             logger.debug("Calling influxdb with query - %s" % _query)
             data = self.client.query(_query)
-        # logger.debug(caller="fetch()", returned_data=data, debug_key=self.path)
+        logger.debug(caller="fetch()", returned_data=data, debug_key=self.path)
         try:
             known_points = data[0]['points']
         except Exception:
-            # logger.debug(caller="fetch()", msg="COULDN'T READ POINTS. SETTING TO EMPTY LIST", debug_key=self.path)
+            logger.debug(caller="fetch()", msg="COULDN'T READ POINTS. SETTING TO EMPTY LIST", debug_key=self.path)
             known_points = []
-        # logger.debug(caller="fetch()", msg="invoking fix_datapoints()", debug_key=self.path)
+        logger.debug(caller="fetch()", msg="invoking fix_datapoints()", debug_key=self.path)
         datapoints = InfluxdbReader.fix_datapoints(known_points, start_time, end_time, self.step, self.path)
 
         time_info = start_time, end_time, self.step
@@ -161,7 +161,7 @@ class InfluxdbReader(object):
             ....
         """
         for seriesdata in data:
-            # logger.debug(caller="fix_datapoints_multi", msg="invoking fix_datapoints()", debug_key=seriesdata['name'])
+            logger.debug(caller="fix_datapoints_multi", msg="invoking fix_datapoints()", debug_key=seriesdata['name'])
             datapoints = InfluxdbReader.fix_datapoints(seriesdata['points'], start_time, end_time, step, seriesdata['name'])
             out[seriesdata['name']] = datapoints
         return out
@@ -171,12 +171,12 @@ class InfluxdbReader(object):
         """
         points is a list of known points (potentially empty)
         """
-        # logger.debug(caller='fix_datapoints', len_known_points=len(known_points), debug_key=debug_key)
-        # if len(known_points) == 1:
-        #     logger.debug(caller='fix_datapoints', only_known_point=known_points[0], debug_key=debug_key)
-        # elif len(known_points) > 1:
-        #     logger.debug(caller='fix_datapoints', first_known_point=known_points[0], debug_key=debug_key)
-        #     logger.debug(caller='fix_datapoints', last_known_point=known_points[-1], debug_key=debug_key)
+        logger.debug(caller='fix_datapoints', len_known_points=len(known_points), debug_key=debug_key)
+        if len(known_points) == 1:
+            logger.debug(caller='fix_datapoints', only_known_point=known_points[0], debug_key=debug_key)
+        elif len(known_points) > 1:
+            logger.debug(caller='fix_datapoints', first_known_point=known_points[0], debug_key=debug_key)
+            logger.debug(caller='fix_datapoints', last_known_point=known_points[-1], debug_key=debug_key)
 
         datapoints = []
         steps = int(round((end_time - start_time) * 1.0 / step))
@@ -186,11 +186,11 @@ class InfluxdbReader(object):
         statsd.timer('service=graphite-api.target_type=gauge.unit=none.what=known_points/needed_points', ratio)
 
         if len(known_points) == steps + 1:
-            # logger.debug(action="No steps missing", debug_key=debug_key)
+            logger.debug(action="No steps missing", debug_key=debug_key)
             datapoints = [p[2] for p in known_points]
         else:
             amount = steps + 1 - len(known_points)
-            # logger.debug(action="Fill missing steps with None values", amount=amount, debug_key=debug_key)
+            logger.debug(action="Fill missing steps with None values", amount=amount, debug_key=debug_key)
             next_point = 0
             for s in range(0, steps + 1):
                 # if we have no more known points, fill with None's
@@ -218,9 +218,9 @@ class InfluxdbReader(object):
                 else:
                     datapoints.append(None)
 
-        # logger.debug(caller='fix_datapoints', len_known_points=len(known_points), len_datapoints=len(datapoints), debug_key=debug_key)
-        # logger.debug(caller='fix_datapoints', first_returned_point=datapoints[0], debug_key=debug_key)
-        # logger.debug(caller='fix_datapoints', last_returned_point=datapoints[-1], debug_key=debug_key)
+        logger.debug(caller='fix_datapoints', len_known_points=len(known_points), len_datapoints=len(datapoints), debug_key=debug_key)
+        logger.debug(caller='fix_datapoints', first_returned_point=datapoints[0], debug_key=debug_key)
+        logger.debug(caller='fix_datapoints', last_returned_point=datapoints[-1], debug_key=debug_key)
         return datapoints
 
     def get_intervals(self):
