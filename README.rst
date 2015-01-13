@@ -53,6 +53,7 @@ In your graphite-api config file::
        user: graphite
        pass: graphite
        db:   graphite
+       ssl: false
        schema:
          - ['', 60]
          - ['high-res-metrics', 10]
@@ -80,6 +81,7 @@ In graphite's ``local_settings.py``::
     INFLUXDB_USER = "graphite"
     INFLUXDB_PASS = "graphite"
     INFLUXDB_DB =  "graphite"
+    INFLUXDB_SSL = "false"
     INFLUXDB_SCHEMA = [
         ('', 60),
         ('high-res-metrics', 10)
