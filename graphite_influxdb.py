@@ -89,6 +89,8 @@ def normalize_config(config=None):
         ret['user'] = cfg.get('user', 'graphite')
         ret['passw'] = cfg.get('pass', 'graphite')
         ret['db'] = cfg.get('db', 'graphite')
+        ssl = cfg.get('ssl', False)
+        ret['ssl'] = (ssl == 'true')
         ret['schema'] = cfg.get('schema', [])
     else:
         from django.conf import settings
@@ -97,6 +99,8 @@ def normalize_config(config=None):
         ret['user'] = getattr(settings, 'INFLUXDB_USER', 'graphite')
         ret['passw'] = getattr(settings, 'INFLUXDB_PASS', 'graphite')
         ret['db'] = getattr(settings, 'INFLUXDB_DB', 'graphite')
+        ssl = getattr(settings, 'INFLUXDB_SSL', False)
+        ret['ssl'] = (ssl == 'true')
         ret['schema'] = getattr(settings, 'INFLUXDB_SCHEMA', [])
     return ret
 
@@ -229,7 +233,7 @@ class InfluxdbFinder(object):
             self.cache = cache
 
         config = normalize_config(config)
-        self.client = InfluxDBClient(config['host'], config['port'], config['user'], config['passw'], config['db'])
+        self.client = InfluxDBClient(config['host'], config['port'], config['user'], config['passw'], config['db'], config['ssl'])
         self.schemas = [(re.compile(patt), step) for (patt, step) in config['schema']]
 
     def assure_series(self, query):
