@@ -1,46 +1,23 @@
 import re
 import time
+import logging
+from logging.handlers import TimedRotatingFileHandler
+import datetime
 
-# graphite-api and graphite-web have different logging systems
+logger = logging.getLogger('graphite_influxdb')
+
 try:
     from graphite_api.intervals import Interval, IntervalSet
     from graphite_api.node import LeafNode, BranchNode
-    import structlog
-    logger = structlog.get_logger()
 except ImportError:
-    from graphite.intervals import Interval, IntervalSet
-    from graphite.node import LeafNode, BranchNode
-    from graphite.logger import log
-    import logging
-
-    class StructlogCompat(object):
-        def __init__(self):
-            log.debugLogger = logging.getLogger("debug")
-
-        @staticmethod
-        def debug(*args, **kwargs):
-            if not log.infoLogger.isEnabledFor(logging.DEBUG):
-                return
-
-            args_list = []
-            for arg in args:
-                args_list.append(arg)
-            for key, value in kwargs.iteritems():
-                args_list.append(key + '=' + str(value))
-            return log.infoLogger.debug(' '.join(args_list))
-    logger = StructlogCompat()
-# uncomment following to enable debugging logger
-#    log.infoLogger.setLevel(logging.DEBUG)
+    try:
+        from graphite.intervals import Interval, IntervalSet
+        from graphite.node import LeafNode, BranchNode
+    except ImportError:
+        raise SystemExit(1, "You have neither graphite_api nor \
+    the graphite webapp in your pythonpath")
 
 from influxdb import InfluxDBClient
-
-# uncomment the following block if you suspect that logger output is often not visible for some reason, but printing works, when you ctrl-c gunicorn at least (this is still a mystery to me)
-
-# def debug(*args, **kwargs):
-#    import pprint
-#    pprint.pprint((args, kwargs))
-# logger.debug = debug
-
 
 class NullStatsd():
     def __enter__(self):
@@ -55,6 +32,40 @@ class NullStatsd():
     def timing(self, key, val):
         pass
 
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
+
+
+class FakeCache(object):
+    """Fake cache object with dummy add/get methods for use in the case
+    that cache is not configured"""
+
+    def get(self, *args):
+        return
+
+    def add(self, *args, **kwargs):
+        pass
+
+_CACHE = None
+try:
+    from graphite_api.app import app
+except ImportError:
+    try:
+        from django.core.cache import cache
+    except ImportError:
+        raise SystemExit(1, "You have neither graphite_api nor \
+    django in your pythonpath")
+    else:
+        _CACHE = cache
+else:
+    # Using getattr to not break horribly if app.cache is not set
+    _CACHE = getattr(app, 'cache', None)
+finally:
+    if not _CACHE:
+        _CACHE = FakeCache()
 
 # in case graphite-api doesn't have statsd configured,
 # just use dummy one that doesn't do anything
@@ -63,7 +74,7 @@ try:
     from graphite_api.app import app
     statsd = app.statsd
     assert statsd is not None
-except:
+except (ImportError, AssertionError):
     statsd = NullStatsd()
 
 # if you want to manually set a statsd client, do this:
@@ -92,6 +103,8 @@ def normalize_config(config=None):
         ssl = cfg.get('ssl', False)
         ret['ssl'] = (ssl == 'true')
         ret['schema'] = cfg.get('schema', [])
+        ret['log_file'] = cfg.get('log_file', None)
+        ret['log_level'] = cfg.get('log_level', 'info')
     else:
         from django.conf import settings
         ret['host'] = getattr(settings, 'INFLUXDB_HOST', 'localhost')
@@ -102,8 +115,12 @@ def normalize_config(config=None):
         ssl = getattr(settings, 'INFLUXDB_SSL', False)
         ret['ssl'] = (ssl == 'true')
         ret['schema'] = getattr(settings, 'INFLUXDB_SCHEMA', [])
+        ret['log_file'] = getattr(
+            settings, 'INFLUXDB_LOG_FILE', None)
+        # Default log level is 'info'
+        ret['log_level'] = getattr(
+            settings, 'INFLUXDB_LOG_LEVEL', 'info')
     return ret
-
 
 class InfluxdbReader(object):
     __slots__ = ('client', 'path', 'step', 'cache')
@@ -121,12 +138,11 @@ class InfluxdbReader(object):
         # influx doesn't support <= and >= yet, hence the add.
         logger.debug(caller="fetch()", start_time=start_time, end_time=end_time, step=self.step, debug_key=self.path)
         with statsd.timer('service=graphite-api.ext_service=influxdb.target_type=gauge.unit=ms.what=query_individual_duration'):
-            data = self.client.query('select time, value from "%s" where time > %ds '
-                                     'and time < %ds order asc' % (
-                                         self.path, start_time, end_time + 1))
-
+            _query = 'select time, value from "%s" where time > %ds and time < %ds order asc' % (
+                self.path, start_time, end_time + 1)
+            logger.debug("Calling influxdb with query - %s" % _query)
+            data = self.client.query(_query)
         logger.debug(caller="fetch()", returned_data=data, debug_key=self.path)
-
         try:
             known_points = data[0]['points']
         except Exception:
@@ -215,7 +231,6 @@ class InfluxdbReader(object):
             now = int(time.time())
             return IntervalSet([Interval(1, now)])
 
-
 class InfluxLeafNode(LeafNode):
     __fetch_multi__ = 'influxdb'
 
@@ -225,32 +240,54 @@ class InfluxdbFinder(object):
     __slots__ = ('client', 'schemas', 'cache')
 
     def __init__(self, config=None):
-        try:
-            from graphite_api.app import app
-            self.cache = app.cache
-        except:
-            from django.core.cache import cache
-            self.cache = cache
-
+        # Shouldn't be trying imports in __init__.
+        # It turns what should be a load error into a runtime error
+        # If cache is not configured, use fake cache object
+        # so that calls to cache.add/get will not break
+        self.cache = _CACHE
         config = normalize_config(config)
         self.client = InfluxDBClient(config['host'], config['port'], config['user'], config['passw'], config['db'], config['ssl'])
         self.schemas = [(re.compile(patt), step) for (patt, step) in config['schema']]
+        self._setup_logger(config['log_level'], config['log_file'])
+
+    def _setup_logger(self, level, log_file):
+        """Setup log level and log file if set"""
+        level = getattr(logging, level.upper())
+        logger.setLevel(level)
+        formatter = logging.Formatter(
+            '[%(levelname)s] %(asctime)s - %(module)s.%(funcName)s() - %(message)s')
+        handler = logging.StreamHandler()
+        logger.addHandler(handler)
+        handler.setFormatter(formatter)
+        if not log_file:
+            return
+        try:
+            handler = TimedRotatingFileHandler(log_file)
+        except IOError:
+            logger.error("Could not write to %s, falling back to stdout",
+                         log_file)
+        else:
+            logger.addHandler(handler)
+            handler.setFormatter(formatter)
 
     def assure_series(self, query):
         regex = self.compile_regex(query, True)
-
         key_series = "%s_series" % query.pattern
         with statsd.timer('service=graphite-api.action=cache_get_series.target_type=gauge.unit=ms'):
             series = self.cache.get(key_series)
         if series is not None:
             return series
-
         # if not in cache, generate from scratch
         # first we must load the list with all nodes
         with statsd.timer('service=graphite-api.ext_service=influxdb.target_type=gauge.unit=ms.action=get_series'):
-            ret = self.client.query("list series /%s/" % regex.pattern)
-            # as long as influxdb doesn't have good safeguards against series with bad data in the metric names, we must filter out like so:
-            series = [serie[1] for serie in ret[0]['points'] if serie[1].encode('ascii', 'ignore') == serie[1]]
+            _query = "list series /%s/" % regex.pattern
+            ret = self.client.query(_query)
+            logger.debug("Calling influxdb with query - %s" % _query)
+            # as long as influxdb doesn't have good safeguards against
+            # series with bad data in the metric names, we must filter out
+            # like so:
+            series = [serie[1] for serie in ret[0]['points']
+                      if serie[1].encode('ascii', 'ignore') == serie[1]]
 
         # store in cache
         with statsd.timer('service=graphite-api.action=cache_set_series.target_type=gauge.unit=ms'):
@@ -258,19 +295,18 @@ class InfluxdbFinder(object):
         return series
 
     def compile_regex(self, query, series=False):
-        # we turn graphite's custom glob-like thing into a regex, like so:
-        # * becomes [^\.]*
-        # . becomes \.
-
-        if series:
-            regex = '^{0}'
-        else:
-            regex = '^{0}$'
+        """Turn wildcard queries into compiled regex
+        * becomes .*
+        . becomes \."""
+        regex = '^{0}'
+        if not series:
+            regex += '$'
 
         regex = regex.format(
-            query.pattern.replace('.', '\.').replace('*', '[^\.]*').replace('{', '(').replace(',', '|').replace('}', ')')
+            query.pattern.replace('.', '\.').replace('*', '[^\.]*').replace(
+                '{', '(').replace(',', '|').replace('}', ')')
         )
-        logger.debug("searching for nodes", pattern=query.pattern, regex=regex)
+        logger.debug("searching for nodes - %s - %s", query.pattern, regex)
         return re.compile(regex)
 
     def get_leaves(self, query):
@@ -281,18 +317,21 @@ class InfluxdbFinder(object):
             return data
         series = self.assure_series(query)
         regex = self.compile_regex(query)
-        logger.debug(caller="get_leaves", key=key_leaves)
-        leaves = []
-        with statsd.timer('service=graphite-api.action=find_leaves.target_type=gauge.unit=ms'):
-            for name in series:
-                if regex.match(name) is not None:
-                    logger.debug("found leaf", name=name)
-                    res = 60  # fallback default
-                    for (rule_patt, rule_res) in self.schemas:
-                        if rule_patt.match(name):
-                            res = rule_res
-                            break
-                    leaves.append([name, res])
+        logger.debug("get_leaves - key %s", key_leaves)
+        timer = statsd.timer('service=graphite-api.action=find_leaves.target_type=gauge.unit=ms')
+        now = datetime.datetime.now()
+        timer.start()
+        leaves = [(name, (res if pattern.match(name) else 60))
+                  for name in series
+                  if regex.match(name)
+                  for (pattern, res) in self.schemas
+                  ]
+        timer.stop()
+        end = datetime.datetime.now()
+        dt = end - now
+        logger.debug("Finished find_leaves in %s.%ss",
+                     dt.seconds,
+                     dt.microseconds)
         with statsd.timer('service=graphite-api.action=cache_set_leaves.target_type=gauge.unit=ms'):
             self.cache.add(key_leaves, leaves, timeout=300)
         return leaves
@@ -304,52 +343,67 @@ class InfluxdbFinder(object):
             data = self.cache.get(key_branches)
         if data is not None:
             return data
+        # Very inefficient call to list
         series = self.assure_series(query)
         regex = self.compile_regex(query)
-        logger.debug(caller="get_branches", key=key_branches)
+        logger.debug("get_branches %s", key_branches)
+        timer = statsd.timer('service=graphite-api.action=find_branches.target_type=gauge.unit=ms')
+        start_time = datetime.datetime.now()
+        timer.start()
         branches = []
-        with statsd.timer('service=graphite-api.action=find_branches.target_type=gauge.unit=ms'):
-            for name in series:
-                while '.' in name:
-                    name = name.rsplit('.', 1)[0]
-                    if name not in seen_branches:
-                        seen_branches.add(name)
-                        if regex.match(name) is not None:
-                            logger.debug("found branch", name=name)
-                            branches.append(name)
+        for name in series:
+            while '.' in name:
+                name = name.rsplit('.', 1)[0]
+                if name not in seen_branches:
+                    seen_branches.add(name)
+                    if regex.match(name) is not None:
+                        logger.debug("found branch name: %s", name)
+                        branches.append(name)
+        timer.stop()
+        end_time = datetime.datetime.now()
+        dt = end_time - start_time
+        logger.debug("Finished find_branches in %s.%ss",
+                     dt.seconds, dt.microseconds)
         with statsd.timer('service=graphite-api.action=cache_set_branches.target_type=gauge.unit=ms'):
             self.cache.add(key_branches, branches, timeout=300)
         return branches
 
     def find_nodes(self, query):
+        logger.debug("Got find nodes query %s", query.pattern)
         # TODO: once we can query influx better for retention periods, honor the start/end time in the FindQuery object
         with statsd.timer('service=graphite-api.action=yield_nodes.target_type=gauge.unit=ms.what=query_duration'):
             for (name, res) in self.get_leaves(query):
-                yield InfluxLeafNode(name, InfluxdbReader(self.client, name, res, self.cache))
+                yield InfluxLeafNode(name, InfluxdbReader(
+                    self.client, name, res, self.cache))
             for name in self.get_branches(query):
                 yield BranchNode(name)
 
     def fetch_multi(self, nodes, start_time, end_time):
         series = ', '.join(['"%s"' % node.path for node in nodes])
         # use the step of the node that is the most coarse
-        # not sure if there's a batter way? can we combine series with different steps (and use the optimal step for each?)
+        # not sure if there's a better way? can we combine series
+        # with different steps (and use the optimal step for each?)
         # probably not
         step = max([node.reader.step for node in nodes])
         query = 'select time, value from %s where time > %ds and time < %ds order asc' % (
                 series, start_time, end_time + 1)
-        logger.debug(caller='fetch_multi', query=query)
-        logger.debug(caller='fetch_multi', start_time=print_time(start_time), end_time=print_time(end_time), step=step)
+        logger.debug('fetch_multi - %s', query)
+        logger.debug('fetch_multi - start_time: %s - end_time: %s, step %s',
+                     print_time(start_time), print_time(end_time), step)
+        
         with statsd.timer('service=graphite-api.ext_service=influxdb.target_type=gauge.unit=ms.action=select_datapoints'):
+            logger.debug("Calling influxdb multi fetch with query - %s", query)
             data = self.client.query(query)
-        logger.debug(caller='fetch_multi', returned_data=data)
+        logger.debug('fetch_multi - Retrieved %s datapoints', len(data))
+        
         if not len(data):
             data = [{'name': node.path, 'points': []} for node in nodes]
-            logger.debug(caller='fetch_multi', FIXING_DATA_TO=data)
-        logger.debug(caller='fetch_multi', len_datapoints_before_fixing=len(data))
-
+            logger.debug('fetch_multi - Fixing data to %s', data)
+        logger.debug('fetch_multi - len datapoints before fixing %s', len(data))
+        
         with statsd.timer('service=graphite-api.action=fix_datapoints_multi.target_type=gauge.unit=ms'):
-            logger.debug(caller='fetch_multi', action='invoking fix_datapoints_multi()')
+            logger.debug('fetch_multi - action %s', 'invoking fix_datapoints_multi()')
             datapoints = InfluxdbReader.fix_datapoints_multi(data, start_time, end_time, step)
-
+            
         time_info = start_time, end_time, step
         return time_info, datapoints
