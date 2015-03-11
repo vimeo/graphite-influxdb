@@ -3,6 +3,7 @@ import time
 import logging
 from logging.handlers import TimedRotatingFileHandler
 import datetime
+from influxdb import InfluxDBClient
 
 logger = logging.getLogger('graphite_influxdb')
 
@@ -17,7 +18,6 @@ except ImportError:
         raise SystemExit(1, "You have neither graphite_api nor \
     the graphite webapp in your pythonpath")
 
-from influxdb import InfluxDBClient
 
 class NullStatsd():
     def __enter__(self):
@@ -121,6 +121,7 @@ def normalize_config(config=None):
         ret['log_level'] = getattr(
             settings, 'INFLUXDB_LOG_LEVEL', 'info')
     return ret
+
 
 class InfluxdbReader(object):
     __slots__ = ('client', 'path', 'step', 'cache')
@@ -229,6 +230,7 @@ class InfluxdbReader(object):
     def get_intervals(self):
             now = int(time.time())
             return IntervalSet([Interval(1, now)])
+
 
 class InfluxLeafNode(LeafNode):
     __fetch_multi__ = 'influxdb'
