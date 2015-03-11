@@ -136,19 +136,19 @@ class InfluxdbReader(object):
         # from is exclusive (from=foo returns data at ts=foo+1 and higher)
         # until is inclusive (until=bar returns data at ts=bar and lower)
         # influx doesn't support <= and >= yet, hence the add.
-        logger.debug(caller="fetch()", start_time=start_time, end_time=end_time, step=self.step, debug_key=self.path)
+        logger.debug("fetch() path=%s start_time=%s, end_time=%s, step=%d", self.path, start_time, end_time, self.step)
         with statsd.timer('service=graphite-api.ext_service=influxdb.target_type=gauge.unit=ms.what=query_individual_duration'):
             _query = 'select time, value from "%s" where time > %ds and time < %ds order asc' % (
                 self.path, start_time, end_time + 1)
-            logger.debug("Calling influxdb with query - %s" % _query)
+            logger.debug("fetch() path=%s querying influxdb query: '%s'", self.path, _query)
             data = self.client.query(_query)
-        logger.debug(caller="fetch()", returned_data=data, debug_key=self.path)
+        logger.debug("fetch() path=%s returned data: %s", self.path, data)
         try:
             known_points = data[0]['points']
         except Exception:
-            logger.debug(caller="fetch()", msg="COULDN'T READ POINTS. SETTING TO EMPTY LIST", debug_key=self.path)
+            logger.debug("fetch() path=%s COULDN'T READ POINTS. SETTING TO EMPTY LIST", self.path)
             known_points = []
-        logger.debug(caller="fetch()", msg="invoking fix_datapoints()", debug_key=self.path)
+        logger.debug("fetch() path=%s invoking fix_datapoints()", self.path)
         datapoints = InfluxdbReader.fix_datapoints(known_points, start_time, end_time, self.step, self.path)
 
         time_info = start_time, end_time, self.step
@@ -165,7 +165,7 @@ class InfluxdbReader(object):
             ....
         """
         for seriesdata in data:
-            logger.debug(caller="fix_datapoints_multi", msg="invoking fix_datapoints()", debug_key=seriesdata['name'])
+            logger.debug("fix_datapoints_multi() on series with name %s invoking fix_datapoints()", seriesdata['name'])
             datapoints = InfluxdbReader.fix_datapoints(seriesdata['points'], start_time, end_time, step, seriesdata['name'])
             out[seriesdata['name']] = datapoints
         return out
@@ -175,12 +175,12 @@ class InfluxdbReader(object):
         """
         points is a list of known points (potentially empty)
         """
-        logger.debug(caller='fix_datapoints', len_known_points=len(known_points), debug_key=debug_key)
+        logger.debug("fix_datapoints() key=%s len_known_points=%d", debug_key, len(known_points))
         if len(known_points) == 1:
-            logger.debug(caller='fix_datapoints', only_known_point=known_points[0], debug_key=debug_key)
+            logger.debug("fix_datapoints() key=%s only_known_point=%s", debug_key, known_points[0])
         elif len(known_points) > 1:
-            logger.debug(caller='fix_datapoints', first_known_point=known_points[0], debug_key=debug_key)
-            logger.debug(caller='fix_datapoints', last_known_point=known_points[-1], debug_key=debug_key)
+            logger.debug("fix_datapoints() key=%s first_known_point=%s", debug_key, known_points[0])
+            logger.debug("fix_datapoints() key=%s last_known_point=%s", debug_key, known_points[-1])
 
         datapoints = []
         steps = int(round((end_time - start_time) * 1.0 / step))
@@ -190,11 +190,11 @@ class InfluxdbReader(object):
         statsd.timer('service=graphite-api.target_type=gauge.unit=none.what=known_points/needed_points', ratio)
 
         if len(known_points) == steps + 1:
-            logger.debug(action="No steps missing", debug_key=debug_key)
+            logger.debug("fix_datapoints() key=%s -> no steps missing!", debug_key)
             datapoints = [p[2] for p in known_points]
         else:
             amount = steps + 1 - len(known_points)
-            logger.debug(action="Fill missing steps with None values", amount=amount, debug_key=debug_key)
+            logger.debug("fix_datapoints() key=%s -> fill %d missing steps with None values", debug_key, amount)
             next_point = 0
             for s in range(0, steps + 1):
                 # if we have no more known points, fill with None's
@@ -222,9 +222,8 @@ class InfluxdbReader(object):
                 else:
                     datapoints.append(None)
 
-        logger.debug(caller='fix_datapoints', len_known_points=len(known_points), len_datapoints=len(datapoints), debug_key=debug_key)
-        logger.debug(caller='fix_datapoints', first_returned_point=datapoints[0], debug_key=debug_key)
-        logger.debug(caller='fix_datapoints', last_returned_point=datapoints[-1], debug_key=debug_key)
+        logger.debug("fix_datapoints() key=%s len_known_points=%d, len_datapoints=%d", debug_key, len(known_points), len(datapoints))
+        logger.debug("fix_datapoints() key=%s first_returned_point=%s, last_returned_point=%s", debug_key, datapoints[0], datapoints[-1])
         return datapoints
 
     def get_intervals(self):
@@ -282,7 +281,7 @@ class InfluxdbFinder(object):
         with statsd.timer('service=graphite-api.ext_service=influxdb.target_type=gauge.unit=ms.action=get_series'):
             _query = "list series /%s/" % regex.pattern
             ret = self.client.query(_query)
-            logger.debug("Calling influxdb with query - %s" % _query)
+            logger.debug("assure_series() Calling influxdb with query - %s", _query)
             # as long as influxdb doesn't have good safeguards against
             # series with bad data in the metric names, we must filter out
             # like so:
@@ -306,7 +305,7 @@ class InfluxdbFinder(object):
             query.pattern.replace('.', '\.').replace('*', '[^\.]*').replace(
                 '{', '(').replace(',', '|').replace('}', ')')
         )
-        logger.debug("searching for nodes - %s - %s", query.pattern, regex)
+        logger.debug("compile_regex() searching for nodes - %s - %s", query.pattern, regex)
         return re.compile(regex)
 
     def get_leaves(self, query):
@@ -317,7 +316,7 @@ class InfluxdbFinder(object):
             return data
         series = self.assure_series(query)
         regex = self.compile_regex(query)
-        logger.debug("get_leaves - key %s", key_leaves)
+        logger.debug("get_leaves() key %s", key_leaves)
         timer = statsd.timer('service=graphite-api.action=find_leaves.target_type=gauge.unit=ms')
         now = datetime.datetime.now()
         timer.start()
@@ -329,7 +328,8 @@ class InfluxdbFinder(object):
         timer.stop()
         end = datetime.datetime.now()
         dt = end - now
-        logger.debug("Finished find_leaves in %s.%ss",
+        logger.debug("get_leaves() key %s Finished find_leaves in %s.%ss",
+                     key_leaves,
                      dt.seconds,
                      dt.microseconds)
         with statsd.timer('service=graphite-api.action=cache_set_leaves.target_type=gauge.unit=ms'):
@@ -346,7 +346,7 @@ class InfluxdbFinder(object):
         # Very inefficient call to list
         series = self.assure_series(query)
         regex = self.compile_regex(query)
-        logger.debug("get_branches %s", key_branches)
+        logger.debug("get_branches() %s", key_branches)
         timer = statsd.timer('service=graphite-api.action=find_branches.target_type=gauge.unit=ms')
         start_time = datetime.datetime.now()
         timer.start()
@@ -357,19 +357,20 @@ class InfluxdbFinder(object):
                 if name not in seen_branches:
                     seen_branches.add(name)
                     if regex.match(name) is not None:
-                        logger.debug("found branch name: %s", name)
+                        logger.debug("get_branches() %s found branch name: %s", key_branches, name)
                         branches.append(name)
         timer.stop()
         end_time = datetime.datetime.now()
         dt = end_time - start_time
-        logger.debug("Finished find_branches in %s.%ss",
+        logger.debug("get_branches() %s Finished find_branches in %s.%ss",
+                     key_branches,
                      dt.seconds, dt.microseconds)
         with statsd.timer('service=graphite-api.action=cache_set_branches.target_type=gauge.unit=ms'):
             self.cache.add(key_branches, branches, timeout=300)
         return branches
 
     def find_nodes(self, query):
-        logger.debug("Got find nodes query %s", query.pattern)
+        logger.debug("find_nodes() query %s", query.pattern)
         # TODO: once we can query influx better for retention periods, honor the start/end time in the FindQuery object
         with statsd.timer('service=graphite-api.action=yield_nodes.target_type=gauge.unit=ms.what=query_duration'):
             for (name, res) in self.get_leaves(query):
@@ -387,23 +388,23 @@ class InfluxdbFinder(object):
         step = max([node.reader.step for node in nodes])
         query = 'select time, value from %s where time > %ds and time < %ds order asc' % (
                 series, start_time, end_time + 1)
-        logger.debug('fetch_multi - %s', query)
-        logger.debug('fetch_multi - start_time: %s - end_time: %s, step %s',
+        logger.debug('fetch_multi() query: %s', query)
+        logger.debug('fetch_multi() - start_time: %s - end_time: %s, step %s',
                      print_time(start_time), print_time(end_time), step)
-        
+
         with statsd.timer('service=graphite-api.ext_service=influxdb.target_type=gauge.unit=ms.action=select_datapoints'):
             logger.debug("Calling influxdb multi fetch with query - %s", query)
             data = self.client.query(query)
-        logger.debug('fetch_multi - Retrieved %s datapoints', len(data))
-        
+        logger.debug('fetch_multi() - Retrieved %d datapoints', len(data))
+
         if not len(data):
             data = [{'name': node.path, 'points': []} for node in nodes]
             logger.debug('fetch_multi - Fixing data to %s', data)
-        logger.debug('fetch_multi - len datapoints before fixing %s', len(data))
-        
+        logger.debug('fetch_multi() - len datapoints before fixing %s', len(data))
+
         with statsd.timer('service=graphite-api.action=fix_datapoints_multi.target_type=gauge.unit=ms'):
-            logger.debug('fetch_multi - action %s', 'invoking fix_datapoints_multi()')
+            logger.debug('fetch_multi() - invoking fix_datapoints_multi()')
             datapoints = InfluxdbReader.fix_datapoints_multi(data, start_time, end_time, step)
-            
+
         time_info = start_time, end_time, step
         return time_info, datapoints
