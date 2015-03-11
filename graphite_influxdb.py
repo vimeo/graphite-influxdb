@@ -322,10 +322,10 @@ class InfluxdbFinder(object):
         timer = statsd.timer('service=graphite-api.action=find_leaves.target_type=gauge.unit=ms')
         now = datetime.datetime.now()
         timer.start()
-        leaves = [(name, (res if pattern.match(name) else 60))
-                  for name in series
-                  if regex.match(name)
-                  for (pattern, res) in self.schemas
+        # return every matching series and its
+        # resolution (based on first pattern match in schema, fallback to 60s)
+        leaves = [(name, next((res for (patt, res) in self.schemas if patt.match(name)), 60))
+                  for name in series if regex.match(name)
                   ]
         timer.stop()
         end = datetime.datetime.now()
