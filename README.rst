@@ -35,6 +35,8 @@ per metric (i.e. per Node/Reader), without looking at the timeframe.   I don't k
 pattern, so we don't need to specify retention timeframes.
 (In fact, in the code we can assume the data exists from now to -infinity, missing data you query for
 will just show up as nulls anyway)
+The schema declares at which interval you should have points in InfluxDB.
+Schema rules use regex and are processed in order, first match wins.  If no rule matches, 60 seconds is used.
 
 
 Using with graphite-api
@@ -42,9 +44,6 @@ Using with graphite-api
 
 You need the patched version from https://github.com/Dieterbe/graphite-api/tarball/support-templates2
 This adds support for caching, statsd instrumentation, and graphite-style templates
-
-The schema declares at which interval you should have points in InfluxDB.
-Schema rules use regex and are processed in order, first match wins.  If no rule matches, 60 seconds is used.
 
 In your graphite-api config file::
 
