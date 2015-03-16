@@ -272,7 +272,7 @@ class InfluxdbFinder(object):
             handler.setFormatter(formatter)
 
     def assure_series(self, query):
-        regex = self.compile_regex(query, True)
+        regex = self.compile_regex('^{0}', query)
         key_series = "%s_series" % query.pattern
         with statsd.timer('service=graphite-api.action=cache_get_series.target_type=gauge.unit=ms'):
             series = self.cache.get(key_series)
@@ -295,20 +295,15 @@ class InfluxdbFinder(object):
             self.cache.add(key_series, series, timeout=300)
         return series
 
-    def compile_regex(self, query, series=False):
-        """Turn wildcard queries into compiled regex
+    def compile_regex(self, fmt, query):
+        """Turn glob (graphite) queries into compiled regex
         * becomes .*
-        . becomes \."""
-        regex = '^{0}'
-        if not series:
-            regex += '$'
-
-        regex = regex.format(
+        . becomes \.
+        fmt argument is so that caller can control anchoring (must contain exactly 1 {0} !"""
+        return re.compile(fmt.format(
             query.pattern.replace('.', '\.').replace('*', '[^\.]*').replace(
                 '{', '(').replace(',', '|').replace('}', ')')
-        )
-        logger.debug("compile_regex() searching for nodes - %s - %s", query.pattern, regex)
-        return re.compile(regex)
+        ))
 
     def get_leaves(self, query):
         key_leaves = "%s_leaves" % query.pattern
@@ -317,7 +312,7 @@ class InfluxdbFinder(object):
         if data is not None:
             return data
         series = self.assure_series(query)
-        regex = self.compile_regex(query)
+        regex = self.compile_regex('^{0}$', query)
         logger.debug("get_leaves() key %s", key_leaves)
         timer = statsd.timer('service=graphite-api.action=find_leaves.target_type=gauge.unit=ms')
         now = datetime.datetime.now()
@@ -347,7 +342,7 @@ class InfluxdbFinder(object):
             return data
         # Very inefficient call to list
         series = self.assure_series(query)
-        regex = self.compile_regex(query)
+        regex = self.compile_regex('^{0}$', query)
         logger.debug("get_branches() %s", key_branches)
         timer = statsd.timer('service=graphite-api.action=find_branches.target_type=gauge.unit=ms')
         start_time = datetime.datetime.now()
