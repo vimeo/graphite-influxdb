@@ -105,6 +105,11 @@ def normalize_config(config=None):
         ret['schema'] = cfg.get('schema', [])
         ret['log_file'] = cfg.get('log_file', None)
         ret['log_level'] = cfg.get('log_level', 'info')
+        cfg = config.get('es', {})
+        ret['es_enabled'] = cfg.get('enabled', False)
+        ret['es_index'] = cfg.get('index', 'graphite_metrics2')
+        ret['es_hosts'] = cfg.get('hosts', ['localhost:9200'])
+        ret['es_field'] = cfg.get('field', '_id')
     else:
         from django.conf import settings
         ret['host'] = getattr(settings, 'INFLUXDB_HOST', 'localhost')
@@ -120,6 +125,10 @@ def normalize_config(config=None):
         # Default log level is 'info'
         ret['log_level'] = getattr(
             settings, 'INFLUXDB_LOG_LEVEL', 'info')
+        ret['es_enabled'] = getattr(settings, 'ES_ENABLED', False)
+        ret['es_index'] = getattr(settings, 'ES_INDEX', 'graphite_metrics2')
+        ret['es_hosts'] = getattr(settings, 'ES_HOSTS', ['localhost:9200'])
+        ret['es_field'] = getattr(settings, 'ES_FIELD', '_id')
     return ret
 
 
@@ -238,7 +247,7 @@ class InfluxLeafNode(LeafNode):
 
 class InfluxdbFinder(object):
     __fetch_multi__ = 'influxdb'
-    __slots__ = ('client', 'schemas', 'cache')
+    __slots__ = ('client', 'es', 'schemas', 'cache', 'config')
 
     def __init__(self, config=None):
         # Shouldn't be trying imports in __init__.
@@ -247,9 +256,14 @@ class InfluxdbFinder(object):
         # so that calls to cache.add/get will not break
         self.cache = _CACHE
         config = normalize_config(config)
+        self.config = config
         self.client = InfluxDBClient(config['host'], config['port'], config['user'], config['passw'], config['db'], config['ssl'])
         self.schemas = [(re.compile(patt), step) for (patt, step) in config['schema']]
         self._setup_logger(config['log_level'], config['log_file'])
+        self.es = None
+        if config['es_enabled']:
+            from elasticsearch import Elasticsearch
+            self.es = Elasticsearch(config['es_hosts'])
 
     def _setup_logger(self, level, log_file):
         """Setup log level and log file if set"""
@@ -272,23 +286,45 @@ class InfluxdbFinder(object):
             handler.setFormatter(formatter)
 
     def assure_series(self, query):
-        regex = self.compile_regex('^{0}', query)
         key_series = "%s_series" % query.pattern
         with statsd.timer('service=graphite-api.action=cache_get_series.target_type=gauge.unit=ms'):
             series = self.cache.get(key_series)
         if series is not None:
             return series
         # if not in cache, generate from scratch
-        # first we must load the list with all nodes
-        with statsd.timer('service=graphite-api.ext_service=influxdb.target_type=gauge.unit=ms.action=get_series'):
-            _query = "list series /%s/" % regex.pattern
-            ret = self.client.query(_query)
-            logger.debug("assure_series() Calling influxdb with query - %s", _query)
-            # as long as influxdb doesn't have good safeguards against
-            # series with bad data in the metric names, we must filter out
-            # like so:
-            series = [serie[1] for serie in ret[0]['points']
-                      if serie[1].encode('ascii', 'ignore') == serie[1]]
+        # if ES configured, try it first, it's usually fastest.
+        if self.es:
+            # note: ES always treats a regex as anchored at start and end
+            regex = self.compile_regex('{0}.*', query)
+            with statsd.timer('service=graphite-api.ext_service=elasticsearch.target_type=gauge.unit=ms.action=get_series'):
+                logger.debug("assure_series() Calling ES with regexp - %s", regex)
+                res = self.es.search(index=self.config['es_index'],
+                                     size=10000,
+                                     body={
+                                         "query": {
+                                             "regexp": {
+                                                 self.config['es_field']: regex.pattern,
+                                             },
+                                         },
+                                         "fields": [self.config['es_field']]
+                                     }
+                                     )
+                if res['_shards']['successful'] > 0:
+                    # pprint(res['hits']['total'])
+                    series = [hit['fields'][self.config['es_field']] for hit in res['hits']['hits']]
+        # if no ES configured, or ES failed, try influxdb.
+        if not series:
+            # regexes in influxdb are not assumed to be anchored, so anchor them explicitly
+            regex = self.compile_regex('^{0}$', query)
+            with statsd.timer('service=graphite-api.ext_service=influxdb.target_type=gauge.unit=ms.action=get_series'):
+                _query = "list series /%s/" % regex.pattern
+                logger.debug("assure_series() Calling influxdb with query - %s", _query)
+                ret = self.client.query(_query)
+                # as long as influxdb doesn't have good safeguards against
+                # series with bad data in the metric names, we must filter out
+                # like so:
+                series = [serie[1] for serie in ret[0]['points']
+                          if serie[1].encode('ascii', 'ignore') == serie[1]]
 
         # store in cache
         with statsd.timer('service=graphite-api.action=cache_set_series.target_type=gauge.unit=ms'):
