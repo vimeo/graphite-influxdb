@@ -298,20 +298,23 @@ class InfluxdbFinder(object):
             regex = self.compile_regex('{0}.*', query)
             with statsd.timer('service=graphite-api.ext_service=elasticsearch.target_type=gauge.unit=ms.action=get_series'):
                 logger.debug("assure_series() Calling ES with regexp - %s", regex)
-                res = self.es.search(index=self.config['es_index'],
-                                     size=10000,
-                                     body={
-                                         "query": {
-                                             "regexp": {
-                                                 self.config['es_field']: regex.pattern,
+                try:
+                    res = self.es.search(index=self.config['es_index'],
+                                         size=10000,
+                                         body={
+                                             "query": {
+                                                 "regexp": {
+                                                     self.config['es_field']: regex.pattern,
+                                                 },
                                              },
-                                         },
-                                         "fields": [self.config['es_field']]
-                                     }
-                                     )
-                if res['_shards']['successful'] > 0:
-                    # pprint(res['hits']['total'])
-                    series = [hit['fields'][self.config['es_field']] for hit in res['hits']['hits']]
+                                             "fields": [self.config['es_field']]
+                                         }
+                                         )
+                    if res['_shards']['successful'] > 0:
+                        # pprint(res['hits']['total'])
+                        series = [hit['fields'][self.config['es_field']] for hit in res['hits']['hits']]
+                except Exception, e:
+                    logger.debug("assure_series() Calling ES failed: %s", e)
         # if no ES configured, or ES failed, try influxdb.
         if not series:
             # regexes in influxdb are not assumed to be anchored, so anchor them explicitly
