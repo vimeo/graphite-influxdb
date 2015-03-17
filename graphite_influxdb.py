@@ -318,7 +318,7 @@ class InfluxdbFinder(object):
         # if no ES configured, or ES failed, try influxdb.
         if not series:
             # regexes in influxdb are not assumed to be anchored, so anchor them explicitly
-            regex = self.compile_regex('^{0}$', query)
+            regex = self.compile_regex('^{0}', query)
             with statsd.timer('service=graphite-api.ext_service=influxdb.target_type=gauge.unit=ms.action=get_series'):
                 _query = "list series /%s/" % regex.pattern
                 logger.debug("assure_series() Calling influxdb with query - %s", _query)
