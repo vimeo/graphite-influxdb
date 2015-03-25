@@ -293,11 +293,12 @@ class InfluxdbFinder(object):
             return series
         # if not in cache, generate from scratch
         # if ES configured, try it first, it's usually fastest.
+        done = False
         if self.es:
             # note: ES always treats a regex as anchored at start and end
             regex = self.compile_regex('{0}.*', query)
             with statsd.timer('service_is_graphite-api.ext_service_is_elasticsearch.target_type_is_gauge.unit_is_ms.action_is_get_series'):
-                logger.debug("assure_series() Calling ES with regexp - %s", regex)
+                logger.debug("assure_series() Calling ES with regexp - %s", regex.pattern)
                 try:
                     res = self.es.search(index=self.config['es_index'],
                                          size=10000,
@@ -313,10 +314,13 @@ class InfluxdbFinder(object):
                     if res['_shards']['successful'] > 0:
                         # pprint(res['hits']['total'])
                         series = [hit['fields'][self.config['es_field']] for hit in res['hits']['hits']]
+                        done = True
+                    else:
+                        logger.error("assure_series() Calling ES failed for %s: no successful shards", regex.pattern)
                 except Exception, e:
-                    logger.debug("assure_series() Calling ES failed: %s", e)
+                    logger.error("assure_series() Calling ES failed for %s: %s", regex.pattern, e)
         # if no ES configured, or ES failed, try influxdb.
-        if not series:
+        if not done:
             # regexes in influxdb are not assumed to be anchored, so anchor them explicitly
             regex = self.compile_regex('^{0}', query)
             with statsd.timer('service_is_graphite-api.ext_service_is_influxdb.target_type_is_gauge.unit_is_ms.action_is_get_series'):
