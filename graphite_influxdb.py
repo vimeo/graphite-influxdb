@@ -437,10 +437,24 @@ class InfluxdbFinder(object):
             data = self.client.query(query)
         logger.debug('fetch_multi() - Retrieved %d datapoints', len(data))
 
-        if not len(data):
-            data = [{'name': node.path, 'points': []} for node in nodes]
-            logger.debug('fetch_multi - Fixing data to %s', data)
-        logger.debug('fetch_multi() - len datapoints before fixing %s', len(data))
+        # some series we requested might not be in the resultset.
+        # this is because influx doesn't include series that had no values
+        # this is a behavior that some people actually appreciate when graphing, but graphite doesn't do this (yet),
+        # and we want to look the same, so we must add those back in.
+        # a better reason though, is because for advanced alerting cases like bosun, you want all entries even if they have no data, so you can properly
+        # compare, join, or do logic with the targets returned for requests for the same data but from different time ranges, you want them to all
+        # include the same keys.
+        query_keys = set([node.path for node in nodes])
+        seen_keys = set([m['name'] for m in data])
+        missing_keys = query_keys.difference(seen_keys)
+        if missing_keys:
+            logger.debug('fetch_multi() - adding missing keys %s', missing_keys)
+            for key in missing_keys:
+                data.append({
+                    'columns': ['time', 'sequence_number', 'value'],
+                    'name': key,
+                    'points': []
+                })
 
         with statsd.timer('service_is_graphite-api.action_is_fix_datapoints_multi.target_type_is_gauge.unit_is_ms'):
             logger.debug('fetch_multi() - invoking fix_datapoints_multi()')
