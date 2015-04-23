@@ -3,7 +3,7 @@ import time
 import logging
 from logging.handlers import TimedRotatingFileHandler
 import datetime
-from influxdb import InfluxDBClient
+from influxdb.influxdb08 import InfluxDBClient
 
 logger = logging.getLogger('graphite_influxdb')
 
