@@ -317,7 +317,7 @@ class InfluxdbFinder(object):
                         done = True
                     else:
                         logger.error("assure_series() Calling ES failed for %s: no successful shards", regex.pattern)
-                except Exception, e:
+                except Exception as e:
                     logger.error("assure_series() Calling ES failed for %s: %s", regex.pattern, e)
         # if no ES configured, or ES failed, try influxdb.
         if not done:
