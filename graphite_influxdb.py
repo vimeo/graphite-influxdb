@@ -3,9 +3,11 @@ import time
 import logging
 from logging.handlers import TimedRotatingFileHandler
 import datetime
-from influxdb.influxdb08 import InfluxDBClient
+from influxdb import InfluxDBClient
 
 logger = logging.getLogger('graphite_influxdb')
+logging.basicConfig()
+logger.setLevel(logging.DEBUG)
 
 try:
     from graphite_api.intervals import Interval, IntervalSet
@@ -49,33 +51,30 @@ class FakeCache(object):
     def add(self, *args, **kwargs):
         pass
 
-_CACHE = None
-try:
-    from graphite_api.app import app
-except ImportError:
-    try:
-        from django.core.cache import cache
-    except ImportError:
-        raise SystemExit(1, "You have neither graphite_api nor \
-    django in your pythonpath")
-    else:
-        _CACHE = cache
-else:
-    # Using getattr to not break horribly if app.cache is not set
-    _CACHE = getattr(app, 'cache', None)
-finally:
-    if not _CACHE:
-        _CACHE = FakeCache()
+_CACHE = FakeCache()
+# try:
+#     from graphite_api.app import app
+# except (ImportError, AttributeError):
+#     try:
+#         from django.core.cache import cache
+#     except (ImportError, AttributeError):
+#         raise SystemExit(1, "You have neither graphite_api nor \
+#     django in your pythonpath")
+#     else:
+#         _CACHE = cache
+# else:
+#     # Using getattr to not break horribly if app.cache is not set
+#     _CACHE = getattr(app, 'cache', FakeCache())
 
 # in case graphite-api doesn't have statsd configured,
 # just use dummy one that doesn't do anything
 # (or if you use graphite-web which just doesn't support statsd)
-try:
-    from graphite_api.app import app
-    statsd = app.statsd
-    assert statsd is not None
-except (ImportError, AssertionError):
-    statsd = NullStatsd()
+# try:
+#     from graphite_api.app import app
+#     statsd = app.statsd
+#     assert statsd is not None
+# except (ImportError, AssertionError, AttributeError):
+statsd = NullStatsd()
 
 # if you want to manually set a statsd client, do this:
 # from statsd import StatsClient
@@ -148,7 +147,7 @@ class InfluxdbReader(object):
         # influx doesn't support <= and >= yet, hence the add.
         logger.debug("fetch() path=%s start_time=%s, end_time=%s, step=%d", self.path, start_time, end_time, self.step)
         with statsd.timer('service_is_graphite-api.ext_service_is_influxdb.target_type_is_gauge.unit_is_ms.what_is_query_individual_duration'):
-            _query = 'select time, value from "%s" where time > %ds and time < %ds order asc' % (
+            _query = 'select value from "%s" where time > %ds and time < %ds order asc' % (
                 self.path, start_time, end_time + 1)
             logger.debug("fetch() path=%s querying influxdb query: '%s'", self.path, _query)
             data = self.client.query(_query)
@@ -166,6 +165,7 @@ class InfluxdbReader(object):
 
     @staticmethod
     def fix_datapoints_multi(data, start_time, end_time, step):
+        # import ipdb; ipdb.set_trace()
         out = {}
         """
         data looks like:
@@ -174,10 +174,11 @@ class InfluxdbReader(object):
             u'points': [[1402928319, 1, 0.133333],
             ....
         """
-        for seriesdata in data:
-            logger.debug("fix_datapoints_multi() on series with name %s invoking fix_datapoints()", seriesdata['name'])
-            datapoints = InfluxdbReader.fix_datapoints(seriesdata['points'], start_time, end_time, step, seriesdata['name'])
-            out[seriesdata['name']] = datapoints
+        for (name, data) in data.items():
+            series_name = name[0]
+            logger.debug("fix_datapoints_multi() on series with name %s invoking fix_datapoints()", series_name)
+            datapoints = InfluxdbReader.fix_datapoints(data, start_time, end_time, step, series_name)
+            out[series_name] = datapoints
         return out
 
     @staticmethod
@@ -185,6 +186,7 @@ class InfluxdbReader(object):
         """
         points is a list of known points (potentially empty)
         """
+        import ipdb; ipdb.set_trace()
         logger.debug("fix_datapoints() key=%s len_known_points=%d", debug_key, len(known_points))
         if len(known_points) == 1:
             logger.debug("fix_datapoints() key=%s only_known_point=%s", debug_key, known_points[0])
@@ -324,14 +326,14 @@ class InfluxdbFinder(object):
             # regexes in influxdb are not assumed to be anchored, so anchor them explicitly
             regex = self.compile_regex('^{0}', query)
             with statsd.timer('service_is_graphite-api.ext_service_is_influxdb.target_type_is_gauge.unit_is_ms.action_is_get_series'):
-                _query = "list series /%s/" % regex.pattern
+                _query = "show series from /%s/" % regex.pattern
                 logger.debug("assure_series() Calling influxdb with query - %s", _query)
                 ret = self.client.query(_query)
                 # as long as influxdb doesn't have good safeguards against
                 # series with bad data in the metric names, we must filter out
                 # like so:
-                series = [serie[1] for serie in ret[0]['points']
-                          if serie[1].encode('ascii', 'ignore') == serie[1]]
+                # import ipdb; ipdb.set_trace()
+                series = [key_name for (key_name,_) in ret.keys()]
 
         # store in cache
         with statsd.timer('service_is_graphite-api.action_is_cache_set_series.target_type_is_gauge.unit_is_ms'):
@@ -410,7 +412,8 @@ class InfluxdbFinder(object):
         return branches
 
     def find_nodes(self, query):
-        logger.debug("find_nodes() query %s", query.pattern)
+        # import ipdb; ipdb.set_trace()
+        logger.debug("find_nodes() query %s", query)
         # TODO: once we can query influx better for retention periods, honor the start/end time in the FindQuery object
         with statsd.timer('service_is_graphite-api.action_is_yield_nodes.target_type_is_gauge.unit_is_ms.what_is_query_duration'):
             for (name, res) in self.get_leaves(query):
@@ -426,7 +429,7 @@ class InfluxdbFinder(object):
         # with different steps (and use the optimal step for each?)
         # probably not
         step = max([node.reader.step for node in nodes])
-        query = 'select time, value from %s where time > %ds and time < %ds order asc' % (
+        query = 'select value from %s where time > %ds and time < %ds order by asc' % (
                 series, start_time, end_time + 1)
         logger.debug('fetch_multi() query: %s', query)
         logger.debug('fetch_multi() - start_time: %s - end_time: %s, step %s',
@@ -445,9 +448,10 @@ class InfluxdbFinder(object):
         # compare, join, or do logic with the targets returned for requests for the same data but from different time ranges, you want them to all
         # include the same keys.
         query_keys = set([node.path for node in nodes])
-        seen_keys = set([m['name'] for m in data])
+        seen_keys = set([key for (key,_) in data.keys()])
         missing_keys = query_keys.difference(seen_keys)
         if missing_keys:
+            import ipdb; ipdb.set_trace()
             logger.debug('fetch_multi() - adding missing keys %s', missing_keys)
             for key in missing_keys:
                 data.append({
@@ -458,7 +462,11 @@ class InfluxdbFinder(object):
 
         with statsd.timer('service_is_graphite-api.action_is_fix_datapoints_multi.target_type_is_gauge.unit_is_ms'):
             logger.debug('fetch_multi() - invoking fix_datapoints_multi()')
-            datapoints = InfluxdbReader.fix_datapoints_multi(data, start_time, end_time, step)
+            # datapoints = InfluxdbReader.fix_datapoints_multi(data, start_time, end_time, step)
 
         time_info = start_time, end_time, step
-        return time_info, datapoints
+        _data = {}
+        for key, v in data.items():
+            _data[key[0]] = [d['value'] for d in v]
+        import ipdb; ipdb.set_trace()
+        return time_info, _data
