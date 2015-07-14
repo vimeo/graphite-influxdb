@@ -8,7 +8,8 @@ Install and configure using docker
 ----------------------------------
 
 Using docker is an easy way to get graphite-api + graphite-influx up and running.
-See https://github.com/Dieterbe/graphite-api-influxdb-docker
+See https://github.com/Dieterbe/graphite-api-influxdb-docker which provides
+a container that has all packages installed to make maximum use of these tools.
 
 Otherwise, follow instructions below.
 Graphite-api is the simplest to setup, though graphite-web might perform better.
@@ -35,6 +36,8 @@ per metric (i.e. per Node/Reader), without looking at the timeframe.   I don't k
 pattern, so we don't need to specify retention timeframes.
 (In fact, in the code we can assume the data exists from now to -infinity, missing data you query for
 will just show up as nulls anyway)
+The schema declares at which interval you should have points in InfluxDB.
+Schema rules use regex and are processed in order, first match wins.  If no rule matches, 60 seconds is used.
 
 
 Using with graphite-api
@@ -42,6 +45,8 @@ Using with graphite-api
 
 You need the patched version from https://github.com/Dieterbe/graphite-api/tarball/support-templates2
 This adds support for caching, statsd instrumentation, and graphite-style templates
+
+Note that the elasticsearch stuff is optional, see below
 
 In your graphite-api config file::
 
@@ -53,9 +58,16 @@ In your graphite-api config file::
        user: graphite
        pass: graphite
        db:   graphite
+       ssl: false
        schema:
-         - ['', 60]
-         - ['high-res-metrics', 10]
+         - ['high-res-metrics', 1]
+         - ['^collectd', 10]
+    es:
+       enabled: false
+       hosts:
+         - elastichost1:9200
+       index: graphite_metrics2
+       field: _id
 
 
 
@@ -63,13 +75,14 @@ Also enable the cache. memcache doesn't seem to work well because the list of se
 filesystem seems to work well::
 
     cache:
-        CACHE_TYPE: 'filesystem'
-        CACHE_DIR: '/tmp/graphite-api-cache'
+        type: 'filesystem'
+        dir: '/tmp/graphite-api-cache'
 
 
 Using with graphite-web
 -----------------------
 
+Note that the elasticsearch stuff is optional, see below
 In graphite's ``local_settings.py``::
 
     STORAGE_FINDERS = (
@@ -80,8 +93,23 @@ In graphite's ``local_settings.py``::
     INFLUXDB_USER = "graphite"
     INFLUXDB_PASS = "graphite"
     INFLUXDB_DB =  "graphite"
+    INFLUXDB_SSL = "false"
     INFLUXDB_SCHEMA = [
         ('', 60),
         ('high-res-metrics', 10)
     ]
+    ES_ENABLED = "false"
+    ES_HOSTS = ['elastichost1:9200']
+    ES_INDEX = "graphite_metrics2"
+    ES_FIELD = "_id"
 
+
+Using Elasticsearch as an index
+-------------------------------
+If you have an index in elasticsearch that contains all your metric id's,
+then you can use that as a metadata source.  Your mileage may vary, but for me ES is noticeably faster.
+(see also https://github.com/influxdb/influxdb/issues/884)
+You just need to install the elasticsearch pip module (comes in the docker image mentioned above) and enable it
+in the config.
+If you're wondering how to populate an ES index, you can use graph-explorer structured metrics plugins or carbon-tagger
+(beware the latter currently only does metrics 2.0 metrics)
