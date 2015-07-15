@@ -133,10 +133,10 @@ def normalize_config(config=None):
 def _make_graphite_api_points_list(influxdb_data):
     """Make graphite-api data points dictionary from Influxdb ResultSet data"""
     _data = {}
-    for key, v in influxdb_data.items():
-        _data[key[0]] = [d['value'] for d in v]
-        return _data
-
+    for key in influxdb_data.keys():
+        # import ipdb; ipdb.set_trace()
+        _data[key[0]] = [d['median'] for d in influxdb_data[key]]
+    return _data
 
 class InfluxdbReader(object):
     __slots__ = ('client', 'path', 'step', 'cache')
@@ -154,8 +154,8 @@ class InfluxdbReader(object):
         # influx doesn't support <= and >= yet, hence the add.
         logger.debug("fetch() path=%s start_time=%s, end_time=%s, step=%d", self.path, start_time, end_time, self.step)
         with statsd.timer('service_is_graphite-api.ext_service_is_influxdb.target_type_is_gauge.unit_is_ms.what_is_query_individual_duration'):
-            _query = 'select value from "%s" where (time > %ds and time <= %ds) fill(null) order by asc' % (
-                self.path, start_time, end_time)
+            _query = 'select median(value) from "%s" where (time > %ds and time <= %ds) group by time (%ss) fill(null) order by asc' % (
+                self.path, start_time, end_time, self.step)
             logger.debug("fetch() path=%s querying influxdb query: '%s'", self.path, _query)
             data = self.client.query(_query)
         logger.debug("fetch() path=%s returned data: %s", self.path, data)
@@ -196,7 +196,7 @@ class InfluxdbReader(object):
             logger.debug("fix_datapoints() key=%s first_known_point=%s", debug_key, known_points[0])
             logger.debug("fix_datapoints() key=%s last_known_point=%s", debug_key, known_points[-1])
 
-        datapoints = []
+        datapoints = known_points
         steps = int(round((end_time - start_time) * 1.0 / step))
         # if we have 3 datapoints: at 0, at 60 and 120, then step is 60, steps = 2 and should have 3 points
         # note that graphite assumes data at quantized intervals, whereas in influx they can be stored at like 07, 67, etc.
@@ -205,7 +205,6 @@ class InfluxdbReader(object):
 
         if len(known_points) == steps + 1:
             logger.debug("fix_datapoints() key=%s -> no steps missing!", debug_key)
-            datapoints = [p[2] for p in known_points]
         else:
             amount = steps + 1 - len(known_points)
             logger.debug("fix_datapoints() key=%s -> fill %d missing steps with None values", debug_key, amount)
@@ -223,14 +222,14 @@ class InfluxdbReader(object):
                 # influxdb's fill(null) will make this cleaner and stop us from having to worry about this.
 
                 should_be_near = start_time + step * s
-                diff = known_points[next_point][0] - should_be_near
+                diff = known_points[next_point] - should_be_near
                 while next_point + 1 < len(known_points) and diff < (step / 2) * -1:
                     next_point += 1
-                    diff = known_points[next_point][0] - should_be_near
+                    diff = known_points[next_point] - should_be_near
 
                 # use this point if it's within step/2 from our target
                 if abs(diff) <= step / 2:
-                    datapoints.append(known_points[next_point][2])
+                    datapoints.append(known_points[next_point])
                     next_point += 1  # note: might go out of bounds, which we use as signal
 
                 else:
@@ -431,8 +430,8 @@ class InfluxdbFinder(object):
         # with different steps (and use the optimal step for each?)
         # probably not
         step = max([node.reader.step for node in nodes])
-        query = 'select value from %s where (time > %ds and time <= %ds) fill(null) order by asc' % (
-                series, start_time, end_time)
+        query = 'select median(value) from %s where (time > %ds and time <= %ds) group by time(%ss) fill(null) order by asc' % (
+                series, start_time, end_time, step)
         logger.debug('fetch_multi() query: %s', query)
         logger.debug('fetch_multi() - start_time: %s - end_time: %s, step %s',
                      print_time(start_time), print_time(end_time), step)
@@ -440,8 +439,8 @@ class InfluxdbFinder(object):
         with statsd.timer('service_is_graphite-api.ext_service_is_influxdb.target_type_is_gauge.unit_is_ms.action_is_select_datapoints'):
             logger.debug("Calling influxdb multi fetch with query - %s", query)
             data = self.client.query(query)
-        logger.debug('fetch_multi() - Retrieved %d result set', len(data))
-
+        logger.debug('fetch_multi() - Retrieved %d result set(s)', len(data))
+        data = _make_graphite_api_points_list(data)
         # some series we requested might not be in the resultset.
         # this is because influx doesn't include series that had no values
         # this is a behavior that some people actually appreciate when graphing, but graphite doesn't do this (yet),
@@ -450,17 +449,7 @@ class InfluxdbFinder(object):
         # compare, join, or do logic with the targets returned for requests for the same data but from different time ranges, you want them to all
         # include the same keys.
         query_keys = set([node.path for node in nodes])
-        seen_keys = set([key for (key,_) in data.keys()])
-        missing_keys = query_keys.difference(seen_keys)
-        if missing_keys:
-            import ipdb; ipdb.set_trace()
-            logger.debug('fetch_multi() - adding missing keys %s', missing_keys)
-            for key in missing_keys:
-                data.append({
-                    'columns': ['time', 'sequence_number', 'value'],
-                    'name': key,
-                    'points': []
-                })
-
+        for key in query_keys:
+            data.setdefault(key, [])
         time_info = start_time, end_time, step
-        return time_info, _make_graphite_api_points_list(data)
+        return time_info, data
