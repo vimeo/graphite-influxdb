@@ -22,7 +22,5 @@ setup(
         'Programming Language :: Python :: 2',
         'Topic :: System :: Monitoring',
     ),
-    install_requires=(
-        'influxdb',
-    ),
+    install_requires=open('requirements.txt').readlines(),
 )
