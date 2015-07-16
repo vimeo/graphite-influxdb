@@ -134,8 +134,8 @@ def _make_graphite_api_points_list(influxdb_data):
     """Make graphite-api data points dictionary from Influxdb ResultSet data"""
     _data = {}
     for key in influxdb_data.keys():
-        # import ipdb; ipdb.set_trace()
-        _data[key[0]] = [d['median'] for d in influxdb_data[key]]
+        _data[key[0]] = [(datetime.datetime.strptime(d['time'].split('.')[0], "%Y-%m-%dT%H:%M:%S"),
+                          d['value']) for d in influxdb_data[key]]
     return _data
 
 class InfluxdbReader(object):
@@ -154,8 +154,8 @@ class InfluxdbReader(object):
         # influx doesn't support <= and >= yet, hence the add.
         logger.debug("fetch() path=%s start_time=%s, end_time=%s, step=%d", self.path, start_time, end_time, self.step)
         with statsd.timer('service_is_graphite-api.ext_service_is_influxdb.target_type_is_gauge.unit_is_ms.what_is_query_individual_duration'):
-            _query = 'select median(value) from "%s" where (time > %ds and time <= %ds) group by time (%ss) fill(null) order by asc' % (
-                self.path, start_time, end_time, self.step)
+            _query = 'select value from "%s" where (time > %ds and time <= %ds) order by asc' % (
+                self.path, start_time, end_time,)
             logger.debug("fetch() path=%s querying influxdb query: '%s'", self.path, _query)
             data = self.client.query(_query)
         logger.debug("fetch() path=%s returned data: %s", self.path, data)
@@ -169,79 +169,91 @@ class InfluxdbReader(object):
 
     @staticmethod
     def fix_datapoints_multi(data, start_time, end_time, step):
-        out = {}
         """
-        data looks like:
-        [{u'columns': [u'time', u'sequence_number', u'value'],
-          u'name': u'stats.timers.dfvimeoplayproxy3.varnish.miss.410.count_ps',
-            u'points': [[1402928319, 1, 0.133333],
-            ....
+        TODO
         """
         for series_name in data:
             logger.debug("fix_datapoints_multi() on series with name %s invoking fix_datapoints()", series_name)
-            datapoints = InfluxdbReader.fix_datapoints(data[series_name], start_time, end_time, step, series_name)
-            out[series_name] = datapoints
-        return out
+            InfluxdbReader.fix_datapoints(data[series_name], start_time, end_time, step, series_name)
+            data[series_name] = [v for (_, v) in data[series_name]]
+        return data
+
+    @staticmethod
+    def _fill_start_gaps(data, index, target_start_time, step):
+        """Fill consecutive gaps in data starting from index where datapoint's time is before
+        target_start_time in step increments. Array data is modified in place.
+        Returns resulting index of data array after modifications.
+        :param data: Data array to be filled
+        :type data: list(tuple(<datetime>, <value>))
+        :param index: Start index of data array
+        :param target_start_time: Target start time of datapoint array
+        :param step: Step increment in seconds
+        :rtype: int"""
+        while target_start_time < (data[index][0] - datetime.timedelta(seconds=step/2)) \
+          and target_start_time < (data[index][0] + datetime.timedelta(seconds=step/2)):
+            data.insert(index, (target_start_time, None))
+            index += 1
+            target_start_time += datetime.timedelta(seconds=step)
+        return index
+
+    @staticmethod
+    def _fill_end_gaps(data, index, target_end_time, step):
+        """Fill consecutive gaps in data starting from index until target_end_time
+        in step increments. Array data is modified in place.
+        Returns resulting index of data array after modifications.
+        :param data: Data array to be filled
+        :type data: list(tuple(<datetime>, <value>))
+        :param index: Start index of data array
+        :param target_start_time: Target end time data array should have values until
+        :param step: Step increment in seconds
+        :rtype: int"""
+        while target_end_time > (data[index][0] - datetime.timedelta(seconds=step/2)) \
+          and target_end_time > (data[index][0] + datetime.timedelta(seconds=step/2)):
+            dt = data[index][0] + datetime.timedelta(seconds=step)
+            data.insert(index+1, (dt, None))
+            index += 1
+        return index
 
     @staticmethod
     def fix_datapoints(known_points, start_time, end_time, step, debug_key):
         """
         points is a list of known points (potentially empty)
         """
-        # import ipdb; ipdb.set_trace()
+        if not known_points:
+            return []
+        steps = int(round((end_time - start_time) * 1.0 / step))
+        start_time, end_time = datetime.datetime.fromtimestamp(start_time), datetime.datetime.fromtimestamp(end_time)
         logger.debug("fix_datapoints() key=%s len_known_points=%d", debug_key, len(known_points))
         if len(known_points) == 1:
             logger.debug("fix_datapoints() key=%s only_known_point=%s", debug_key, known_points[0])
         elif len(known_points) > 1:
             logger.debug("fix_datapoints() key=%s first_known_point=%s", debug_key, known_points[0])
             logger.debug("fix_datapoints() key=%s last_known_point=%s", debug_key, known_points[-1])
-
-        datapoints = known_points
-        steps = int(round((end_time - start_time) * 1.0 / step))
-        # if we have 3 datapoints: at 0, at 60 and 120, then step is 60, steps = 2 and should have 3 points
-        # note that graphite assumes data at quantized intervals, whereas in influx they can be stored at like 07, 67, etc.
-        ratio = len(known_points) * 1.0 / (steps + 1)
-        statsd.timer('service_is_graphite-api.target_type_is_gauge.unit_is_none.what_is_known_points/needed_points', ratio)
-
         if len(known_points) == steps + 1:
-            logger.debug("fix_datapoints() key=%s -> no steps missing!", debug_key)
-        else:
-            amount = steps + 1 - len(known_points)
-            logger.debug("fix_datapoints() key=%s -> fill %d missing steps with None values", debug_key, amount)
-            next_point = 0
-            for s in range(0, steps + 1):
-                # if we have no more known points, fill with None's
-                # even ininitially when next_point = 0, len(known_points) might be == 0
-                if next_point >= len(known_points):
-                    datapoints.append(None)
-                    continue
-
-                # if points are not evenly spaced. i.e. they should be a minute apart but sometimes they are 55 or 65 seconds,
-                # and if they are all about step/2 away from the target timestamps, then sometimes a target point has 2 candidates, and
-                # sometimes 0. So a point might be more than step/2 older.  in that case, since points are sorted, we can just forward the pointer
-                # influxdb's fill(null) will make this cleaner and stop us from having to worry about this.
-
-                should_be_near = start_time + step * s
-                diff = known_points[next_point] - should_be_near
-                while next_point + 1 < len(known_points) and diff < (step / 2) * -1:
-                    next_point += 1
-                    diff = known_points[next_point] - should_be_near
-
-                # use this point if it's within step/2 from our target
-                if abs(diff) <= step / 2:
-                    datapoints.append(known_points[next_point])
-                    next_point += 1  # note: might go out of bounds, which we use as signal
-
-                else:
-                    datapoints.append(None)
-
-        logger.debug("fix_datapoints() key=%s len_known_points=%d, len_datapoints=%d", debug_key, len(known_points), len(datapoints))
-        logger.debug("fix_datapoints() key=%s first_returned_point=%s, last_returned_point=%s", debug_key, datapoints[0], datapoints[-1])
-        return datapoints
-
+            return known_points
+        # Fill gaps from our start_time until first datapoint
+        i = InfluxdbReader._fill_start_gaps(known_points, 0, start_time, step)
+        while i < len(known_points):
+            _curtime, _curvalue = known_points[i]
+            try:
+                _next_time, _next_value = known_points[i+1][0], known_points[i+1][1]
+            except IndexError:
+                _next_time, _next_value = None, None
+            if not _next_time:
+                # Fill gaps from last datapoint to end_time
+                InfluxdbReader._fill_end_gaps(known_points, i, end_time, step)
+                break
+            if abs((_next_time - _curtime).total_seconds()) < step:
+                del known_points[i]
+                continue
+            # Fill gaps from current until next datapoint's time
+            # import ipdb; ipdb.set_trace()
+            i = InfluxdbReader._fill_end_gaps(known_points, i, _next_time, step) + 1
+        # import ipdb; ipdb.set_trace()
+    
     def get_intervals(self):
-            now = int(time.time())
-            return IntervalSet([Interval(1, now)])
+        now = int(time.time())
+        return IntervalSet([Interval(1, now)])
 
 
 class InfluxLeafNode(LeafNode):
@@ -430,8 +442,8 @@ class InfluxdbFinder(object):
         # with different steps (and use the optimal step for each?)
         # probably not
         step = max([node.reader.step for node in nodes])
-        query = 'select median(value) from %s where (time > %ds and time <= %ds) group by time(%ss) fill(null) order by asc' % (
-                series, start_time, end_time, step)
+        query = 'select value from %s where (time > %ds and time <= %ds) order by asc' % (
+                series, start_time, end_time,)
         logger.debug('fetch_multi() query: %s', query)
         logger.debug('fetch_multi() - start_time: %s - end_time: %s, step %s',
                      print_time(start_time), print_time(end_time), step)
@@ -451,5 +463,7 @@ class InfluxdbFinder(object):
         query_keys = set([node.path for node in nodes])
         for key in query_keys:
             data.setdefault(key, [])
+        InfluxdbReader.fix_datapoints_multi(data, start_time, end_time, step)
         time_info = start_time, end_time, step
+        # import ipdb; ipdb.set_trace()
         return time_info, data
