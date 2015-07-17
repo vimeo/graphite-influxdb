@@ -215,7 +215,7 @@ class InfluxdbReader(object):
           target_end_time >= (data[index][0] + datetime.timedelta(seconds=step/2)):
             dt = data[index][0] + datetime.timedelta(seconds=step)
             try:
-                if not abs((data[index+1][0] - dt).total_seconds()) < step:
+                if not (data[index+1][0] - dt).seconds < step:
                     data.insert(index+1, (dt, None))
                 else:
                     InfluxdbReader._remove_multi_points_near_index(data, index+1, dt, step)
@@ -232,7 +232,7 @@ class InfluxdbReader(object):
             _next_time, _next_value = None, None
         # Do we have two or more datapoints in same bucket?
         # Use last datapoint, ignore others
-        if _next_time and (abs((_next_time - curtime).total_seconds()) <= step):
+        if _next_time and ((_next_time - curtime).seconds <= step):
             del datapoints[index]
             return True
 
@@ -268,8 +268,7 @@ class InfluxdbReader(object):
                 _next_time, _next_value = None, None
             # Do we have two or more datapoints in same bucket?
             # Use last datapoint, ignore others.
-            if _next_time and (abs((_next_time - _curtime).total_seconds()) < step):
-                del datapoints[i]
+            if InfluxdbReader._remove_multi_points_near_index(datapoints, i+1, _curtime, step):
                 continue
             # Fill gaps from current until next datapoint's time
             i = InfluxdbReader._fill_end_gaps(datapoints, i, _next_time, step)
