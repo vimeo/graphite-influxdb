@@ -175,7 +175,10 @@ class InfluxdbReader(object):
         for series_name in data:
             logger.debug("fix_datapoints_multi() on series with name %s invoking fix_datapoints()", series_name)
             InfluxdbReader.fix_datapoints(data[series_name], start_time, end_time, step, series_name)
-            data[series_name] = [v for (_, v) in data[series_name]]
+            # Return generator as data series target so as not to duplicate the list(s)
+            # Need to flatten the list first to remove the datetime so cannot just return
+            # the existing list objects here
+            data[series_name] = (v for (_, v) in data[series_name])
         return data
 
     @staticmethod
@@ -192,7 +195,6 @@ class InfluxdbReader(object):
         
         while (data[index][0] - datetime.timedelta(seconds=step/2)) > \
           target_start_time < (data[index][0] + datetime.timedelta(seconds=step/2)):
-            # import ipdb; ipdb.set_trace()
             data.insert(index, (target_start_time, None))
             index += 1
             target_start_time += datetime.timedelta(seconds=step)
@@ -217,10 +219,8 @@ class InfluxdbReader(object):
                     data.insert(index+1, (dt, None))
                 else:
                     InfluxdbReader._remove_multi_points_near_index(data, index+1, dt, step)
-                    # continue
             except IndexError:
                 data.insert(index+1, (dt, None))
-            # import ipdb; ipdb.set_trace()
             index += 1
         return index
 
@@ -253,12 +253,9 @@ class InfluxdbReader(object):
             logger.debug("fix_datapoints() key=%s last_known_point=%s", debug_key, datapoints[-1])
         if len(datapoints) == steps + 1:
             return datapoints
-        # Fill gaps from our start time + step until first datapoint
-        # Graphite queries are exclusive of start time, so datapoints
-        # should begin at T+1 where T is start time
-        # import ipdb; ipdb.set_trace()
+        # Fill gaps from our start time until first datapoint
         i = InfluxdbReader._fill_start_gaps(datapoints, 0,
-                                            start_time + datetime.timedelta(seconds=step), step)
+                                            start_time, step)
         while i < len(datapoints):
             # Fill gaps from last datapoint to end_time and stop
             if i == (len(datapoints)-1):
@@ -373,7 +370,6 @@ class InfluxdbFinder(object):
                 # as long as influxdb doesn't have good safeguards against
                 # series with bad data in the metric names, we must filter out
                 # like so:
-                # import ipdb; ipdb.set_trace()
                 series = [key_name for (key_name,_) in ret.keys()]
 
         # store in cache
@@ -493,5 +489,4 @@ class InfluxdbFinder(object):
             data.setdefault(key, [])
         InfluxdbReader.fix_datapoints_multi(data, start_time, end_time, step)
         time_info = start_time, end_time, step
-        # import ipdb; ipdb.set_trace()
         return time_info, data
