@@ -215,40 +215,47 @@ class InfluxdbReader(object):
         return index
 
     @staticmethod
-    def fix_datapoints(known_points, start_time, end_time, step, debug_key):
+    def fix_datapoints(datapoints, start_time, end_time, step, debug_key):
         """
         points is a list of known points (potentially empty)
         """
-        if not known_points:
+        if not datapoints:
             return []
         steps = int(round((end_time - start_time) * 1.0 / step))
         start_time, end_time = datetime.datetime.fromtimestamp(start_time), datetime.datetime.fromtimestamp(end_time)
-        logger.debug("fix_datapoints() key=%s len_known_points=%d", debug_key, len(known_points))
-        if len(known_points) == 1:
-            logger.debug("fix_datapoints() key=%s only_known_point=%s", debug_key, known_points[0])
-        elif len(known_points) > 1:
-            logger.debug("fix_datapoints() key=%s first_known_point=%s", debug_key, known_points[0])
-            logger.debug("fix_datapoints() key=%s last_known_point=%s", debug_key, known_points[-1])
-        if len(known_points) == steps + 1:
-            return known_points
-        # Fill gaps from our start_time until first datapoint
-        i = InfluxdbReader._fill_start_gaps(known_points, 0, start_time, step)
-        while i < len(known_points):
-            _curtime, _curvalue = known_points[i]
+        logger.debug("fix_datapoints() key=%s len_datapoints=%d", debug_key, len(datapoints))
+        if len(datapoints) == 1:
+            logger.debug("fix_datapoints() key=%s only_known_point=%s", debug_key, datapoints[0])
+        elif len(datapoints) > 1:
+            logger.debug("fix_datapoints() key=%s first_known_point=%s", debug_key, datapoints[0])
+            logger.debug("fix_datapoints() key=%s last_known_point=%s", debug_key, datapoints[-1])
+        if len(datapoints) == steps + 1:
+            return datapoints
+        # Fill gaps from our start_time + step until first datapoint
+        # Graphite queries are exclusive of start time, meaning datapoints
+        # should start at T+1 where T is start time
+        i = InfluxdbReader._fill_start_gaps(datapoints, 0,
+                                            start_time + datetime.timedelta(seconds=step), step)
+        while i < len(datapoints):
+            # Fill gaps from last datapoint to end_time and stop
+            if i == (len(datapoints)-1):
+                InfluxdbReader._fill_end_gaps(datapoints, i, end_time, step)
+                break
+            _curtime, _curvalue = datapoints[i]
             try:
-                _next_time, _next_value = known_points[i+1][0], known_points[i+1][1]
+                _next_time, _next_value = datapoints[i+1][0], datapoints[i+1][1]
             except IndexError:
                 _next_time, _next_value = None, None
-            if not _next_time:
-                # Fill gaps from last datapoint to end_time
-                InfluxdbReader._fill_end_gaps(known_points, i, end_time, step)
-                break
+            # Do we have two or more datapoints in same bucket?
+            # Use last datapoint, ignore others.
             if abs((_next_time - _curtime).total_seconds()) < step:
-                del known_points[i]
+                del datapoints[i]
                 continue
             # Fill gaps from current until next datapoint's time
             # import ipdb; ipdb.set_trace()
-            i = InfluxdbReader._fill_end_gaps(known_points, i, _next_time, step) + 1
+            i = InfluxdbReader._fill_end_gaps(datapoints, i, _next_time, step) + 1
+        logger.debug("fix_datapoints() key=%s len_datapoints=%d, len_datapoints=%d", debug_key, len(datapoints), len(datapoints))
+        logger.debug("fix_datapoints() key=%s first_returned_point=%s, last_returned_point=%s", debug_key, datapoints[0], datapoints[-1])
         # import ipdb; ipdb.set_trace()
     
     def get_intervals(self):
