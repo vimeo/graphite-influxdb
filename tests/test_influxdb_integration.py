@@ -23,7 +23,22 @@ class GraphiteInfluxdbIntegrationTestCase(unittest.TestCase):
 
     def test_find_series(self):
         """Test finding a series by name"""
-        nodes = [node.name for node in self.finder.find_nodes(Query('integration_test'))]
+        nodes = [node.name for node in self.finder.find_nodes(Query('integration_test'))
+                 if node.is_leaf]
         expected = ['integration_test']
         self.assertEqual(nodes, expected,
-                         msg="Got node list %s - wanted %s" % (nodes, expected))
+                        msg="Got node list %s - wanted %s" % (nodes, expected))
+
+    def test_find_series_wildcard(self):
+        """Test finding all series by wildcard"""
+        nodes = [node.name for node in self.finder.find_nodes(Query('*'))]
+        expected = 'integration_test'
+        self.assertTrue(expected in nodes,
+                        msg="Node list does not contain '%s' - %s" % (expected, nodes))
+
+    def test_find_leaf_nodes(self):
+        """Test finding leaf nodes by wildcard"""
+        nodes = [node.name for node in self.finder.find_nodes(Query('integration_test.*'))]
+        expected = ['leaf_node1', 'leaf_node2']
+        self.assertEqual(nodes, expected,
+                         msg="Expected leaf node list '%s' - got %s" % (expected, nodes))
