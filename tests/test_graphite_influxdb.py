@@ -10,7 +10,7 @@ class GraphiteInfluxdbTestCase(unittest.TestCase):
         self.reader = graphite_influxdb.InfluxdbReader(None, None, self.step, None)
         self.start_time, self.end_time, self.series_name = datetime.datetime.now(), \
           datetime.datetime.now() + datetime.timedelta(hours=1), 'my_series'
-        self.steps = int(round((int(self.end_time.strftime("%s")) - int(self.start_time.strftime("%s"))) * 1.0 / self.step))
+        self.steps = int(round((int(self.end_time.strftime("%s")) - int(self.start_time.strftime("%s"))) * 1.0 / self.step)) + 1
         self.datapoints = [(self.start_time + datetime.timedelta(minutes=20), random.randint(1,5)),
                            # Two points in same step
                            (self.start_time + datetime.timedelta(minutes=40), random.randint(1,5)),
@@ -20,7 +20,7 @@ class GraphiteInfluxdbTestCase(unittest.TestCase):
 
     def test_fix_datapoints(self):
         """Test that filling datapoints gives expected results"""
-        self.reader.fix_datapoints(self.datapoints,
+        self.datapoints = self.reader.fix_datapoints(self.datapoints,
                                    int(self.start_time.strftime("%s")),
                                    int(self.end_time.strftime("%s")), self.step, self.series_name)
         # import ipdb; ipdb.set_trace()
@@ -37,6 +37,7 @@ class GraphiteInfluxdbTestCase(unittest.TestCase):
                                          int(self.start_time.strftime("%s")),
                                          int(self.end_time.strftime("%s")), self.step)
         for series_name in data:
+            # import ipdb; ipdb.set_trace()
             self.assertTrue(self.steps == len(list(data[series_name])),
                             msg="Expected %s datapoints, got %s instead" % (
                                 self.steps, len(list(data[series_name])),))
