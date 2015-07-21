@@ -23,6 +23,7 @@ class GraphiteInfluxdbTestCase(unittest.TestCase):
         self.reader.fix_datapoints(self.datapoints,
                                    int(self.start_time.strftime("%s")),
                                    int(self.end_time.strftime("%s")), self.step, self.series_name)
+        # import ipdb; ipdb.set_trace()
         self.assertTrue(self.steps == len(self.datapoints),
                         msg="Expected %s datapoints, got %s instead" % (
                             self.steps, len(self.datapoints),))

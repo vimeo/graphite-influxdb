@@ -4,6 +4,8 @@ import logging
 from logging.handlers import TimedRotatingFileHandler
 import datetime
 from influxdb import InfluxDBClient
+# import pandas
+# from pandas import DataFrame
 
 logger = logging.getLogger('graphite_influxdb')
 logging.basicConfig()
@@ -178,6 +180,9 @@ class InfluxdbReader(object):
             # Return generator as data series target so as not to duplicate the list(s)
             # Need to flatten the list first to remove the datetime so cannot just return
             # the existing list objects here
+            from pprint import pprint
+            pprint(data[series_name])
+            # import ipdb; ipdb.set_trace()
             data[series_name] = (v for (_, v) in data[series_name])
         return data
 
@@ -214,15 +219,27 @@ class InfluxdbReader(object):
         while (data[index][0] - datetime.timedelta(seconds=step/2)) <= \
           target_end_time >= (data[index][0] + datetime.timedelta(seconds=step/2)):
             dt = data[index][0] + datetime.timedelta(seconds=step)
-            try:
-                if not (data[index+1][0] - dt).seconds < step:
-                    data.insert(index+1, (dt, None))
-                else:
-                    InfluxdbReader._remove_multi_points_near_index(data, index+1, dt, step)
-            except IndexError:
-                data.insert(index+1, (dt, None))
             index += 1
-        return index
+            # 
+            try:
+                if abs((data[index][0] - dt)).seconds <= step:
+                    # import ipdb; ipdb.set_trace()
+                    val1, val2 = data[index-1][1] if data[index-1][1] else 0, \
+                        data[index][1] if data[index][1] else 0
+                    val = (val1 + val2)/2
+                    logger.debug("Got multiple datapoints within step - averaging %s and %s",
+                                 data[index][1], data[index+1][1])
+                    data.insert(index, (dt, val))
+                    # del data[index-1]
+                    del data[index+1]
+                    continue
+                    # import ipdb; ipdb.set_trace()
+                    # InfluxdbReader._remove_multi_points_near_index(data, index, dt, step)
+                if data[index][0] > dt:
+                    data.insert(index, (dt, None))
+            except IndexError:
+                data.insert(index, (dt, None))
+        return index+1
 
     @staticmethod
     def _remove_multi_points_near_index(datapoints, index, curtime, step):
@@ -245,7 +262,8 @@ class InfluxdbReader(object):
             return []
         steps = int(round((end_time - start_time) * 1.0 / step))
         start_time, end_time = datetime.datetime.fromtimestamp(start_time), datetime.datetime.fromtimestamp(end_time)
-        logger.debug("fix_datapoints() key=%s len_datapoints=%d", debug_key, len(datapoints))
+        logger.debug("fix_datapoints() key=%s len_datapoints=%d start_time=%s end_time=%s step=%s",
+                     debug_key, len(datapoints), start_time, end_time, step,)
         if len(datapoints) == 1:
             logger.debug("fix_datapoints() key=%s only_known_point=%s", debug_key, datapoints[0])
         elif len(datapoints) > 1:
@@ -259,7 +277,8 @@ class InfluxdbReader(object):
         while i < len(datapoints):
             # Fill gaps from last datapoint to end_time and stop
             if i == (len(datapoints)-1):
-                InfluxdbReader._fill_end_gaps(datapoints, i, end_time, step)
+                # import ipdb; ipdb.set_trace()
+                InfluxdbReader._fill_end_gaps(datapoints, i-1, end_time, step)
                 break
             _curtime, _curvalue = datapoints[i]
             try:
@@ -271,6 +290,7 @@ class InfluxdbReader(object):
             if InfluxdbReader._remove_multi_points_near_index(datapoints, i+1, _curtime, step):
                 continue
             # Fill gaps from current until next datapoint's time
+            # import ipdb; ipdb.set_trace()
             i = InfluxdbReader._fill_end_gaps(datapoints, i, _next_time, step)
         logger.debug("fix_datapoints() key=%s len_datapoints=%d, len_datapoints=%d", debug_key, len(datapoints), len(datapoints))
         logger.debug("fix_datapoints() key=%s first_returned_point=%s, last_returned_point=%s", debug_key, datapoints[0], datapoints[-1])
@@ -306,6 +326,8 @@ class InfluxdbFinder(object):
 
     def _setup_logger(self, level, log_file):
         """Setup log level and log file if set"""
+        if logger.handlers:
+            return
         level = getattr(logging, level.upper())
         logger.setLevel(level)
         formatter = logging.Formatter(
