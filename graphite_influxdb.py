@@ -220,16 +220,12 @@ class InfluxdbReader(object):
         while step_end <= target_end_time:
             from pprint import pprint
             # import ipdb; ipdb.set_trace()
+            vals = []
             try:
-                while (data[index][0] + datetime.timedelta(seconds=step/2.0)) >= step_end \
-                  > (data[index+1][0] - datetime.timedelta(seconds=step/2.0)):
-                    val1 = data[index][1] if data[index][1] else 0
-                    val = (val1 + data[index+1][1])/2.0
-                    del data[index+1]
+                while (step_end - datetime.timedelta(seconds=step/2.0)) <= \
+                  data[index][0] <= (step_end + datetime.timedelta(seconds=step/2.0)):
+                    vals.append(data[index][1])
                     del data[index]
-                    data.insert(index, (step_end, val))
-                    index -= 1
-                    continue
                 else:
                     if data[index][0] < step_end:
                         index += 1
@@ -239,12 +235,17 @@ class InfluxdbReader(object):
                         index += 1
                         step_end += datetime.timedelta(seconds=step)
                         continue
-                    data.insert(index, (step_end, None))
+                    if not vals:
+                        data.insert(index, (step_end, None))
+                if vals:
+                    data.insert(index, (step_end, sum(vals)/len(vals)))
             except IndexError:
-                # import ipdb; ipdb.set_trace()
                 if index < len(data) and ((data[index][0] - datetime.timedelta(seconds=step/2)) <= step_end):
                     break
-                data.insert(index, (step_end, None))
+                if vals:
+                    data.insert(index, (step_end, sum(vals)/len(vals)))
+                else:
+                    data.insert(index, (step_end, None))
             step_end += datetime.timedelta(seconds=step)
             index += 1
 
