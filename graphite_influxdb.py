@@ -216,37 +216,37 @@ class InfluxdbReader(object):
         :param target_start_time: Target end time data array should have values until
         :param step: Step increment in seconds
         :rtype: int"""
-        step_end = data[index][0] + datetime.timedelta(seconds=step)
-        while step_end <= target_end_time:
+        bucket_start, bucket_end = data[index][0], data[index][0] + datetime.timedelta(seconds=step)
+        while bucket_end <= target_end_time:
             from pprint import pprint
             # import ipdb; ipdb.set_trace()
             vals = []
             try:
-                while (step_end - datetime.timedelta(seconds=step/2.0)) <= \
-                  data[index][0] <= (step_end + datetime.timedelta(seconds=step/2.0)):
+                while bucket_start < data[index][0] <= bucket_end:
                     vals.append(data[index][1])
                     del data[index]
                 else:
-                    if data[index][0] < step_end:
+                    if data[index][0] < bucket_end:
                         index += 1
                         continue
-                    elif (step_end - datetime.timedelta(seconds=step/2)) <= data[index][0] \
-                        <= (step_end + datetime.timedelta(seconds=step/2)):
+                    elif bucket_start < data[index][0] <= bucket_end:
                         index += 1
-                        step_end += datetime.timedelta(seconds=step)
+                        bucket_start += datetime.timedelta(seconds=step)
+                        bucket_end += datetime.timedelta(seconds=step)
                         continue
                     if not vals:
-                        data.insert(index, (step_end, None))
+                        data.insert(index, (bucket_end, None))
                 if vals:
-                    data.insert(index, (step_end, sum(vals)/len(vals)))
+                    data.insert(index, (bucket_end, sum(vals)/float(len(vals))))
             except IndexError:
-                if index < len(data) and ((data[index][0] - datetime.timedelta(seconds=step/2)) <= step_end):
+                if index < len(data) and ((data[index][0] - datetime.timedelta(seconds=step/2)) <= bucket_end):
                     break
                 if vals:
-                    data.insert(index, (step_end, sum(vals)/len(vals)))
+                    data.insert(index, (bucket_end, sum(vals)/float(len(vals))))
                 else:
-                    data.insert(index, (step_end, None))
-            step_end += datetime.timedelta(seconds=step)
+                    data.insert(index, (bucket_end, None))
+            bucket_start += datetime.timedelta(seconds=step)
+            bucket_end += datetime.timedelta(seconds=step)
             index += 1
 
     @staticmethod
@@ -254,19 +254,6 @@ class InfluxdbReader(object):
         """
         points is a list of known points (potentially empty)
         """
-        # if not datapoints:
-        #     return []
-        # steps = int(round((end_time - start_time) * 1.0 / step))
-        # start_time, end_time = datetime.datetime.fromtimestamp(start_time), datetime.datetime.fromtimestamp(end_time)
-        # datapoints.insert(0, (start_time, None))
-        # datapoints.insert(len(datapoints), (end_time, None))
-
-        # df = pandas.DataFrame(data=(d[1] for d in datapoints),
-        #                       index=(d[0] for d in datapoints),
-        #                       columns=['value'])
-        # return df.resample('%sS' % (step,))
-        ## Pure python
-        #######
         if not datapoints:
             return []
         steps = int(round((end_time - start_time) * 1.0 / step))
@@ -284,26 +271,6 @@ class InfluxdbReader(object):
         i = InfluxdbReader._fill_start_gaps(datapoints, 0,
                                             start_time, step)
         InfluxdbReader._fill_end_gaps(datapoints, i, end_time, step)
-        # while i < len(datapoints):
-        #     # Fill gaps from last datapoint to end_time and stop
-        #     if i == (len(datapoints)-1):
-        #         # import ipdb; ipdb.set_trace()
-        #         InfluxdbReader._fill_end_gaps(datapoints, i-1, end_time, step)
-        #         break
-        #     _curtime, _curvalue = datapoints[i]
-        #     try:
-        #         _next_time, _next_value = datapoints[i+1][0], datapoints[i+1][1]
-        #     except IndexError:
-        #         _next_time, _next_value = None, None
-        #     # Do we have two or more datapoints in same bucket?
-        #     # Use last datapoint, ignore others.
-        #     # if InfluxdbReader._remove_multi_points_near_index(datapoints, i+1, _curtime, step):
-        #     #     continue
-        #     # Fill gaps from current until next datapoint's time
-        #     # import ipdb; ipdb.set_trace()
-        #     i = InfluxdbReader._fill_end_gaps(datapoints, i, _next_time, step)
-        # logger.debug("fix_datapoints() key=%s len_datapoints=%d, len_datapoints=%d", debug_key, len(datapoints), len(datapoints))
-        # logger.debug("fix_datapoints() key=%s first_returned_point=%s, last_returned_point=%s", debug_key, datapoints[0], datapoints[-1])
     
     def get_intervals(self):
         now = int(time.time())
