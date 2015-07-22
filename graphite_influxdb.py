@@ -217,12 +217,12 @@ class InfluxdbReader(object):
         :param step: Step increment in seconds
         :rtype: int"""
         step_end = data[index][0] + datetime.timedelta(seconds=step)
-        # import ipdb; ipdb.set_trace()
         while step_end <= target_end_time:
             from pprint import pprint
             # import ipdb; ipdb.set_trace()
             try:
-                while data[index][0] >= step_end > (data[index+1][0] - datetime.timedelta(seconds=step)):
+                while (data[index][0] + datetime.timedelta(seconds=step/2.0)) >= step_end \
+                  > (data[index+1][0] - datetime.timedelta(seconds=step/2.0)):
                     val1 = data[index][1] if data[index][1] else 0
                     val = (val1 + data[index+1][1])/2.0
                     del data[index+1]
@@ -231,13 +231,18 @@ class InfluxdbReader(object):
                     index -= 1
                     continue
                 else:
-                    if data[index][0] <= step_end:
+                    if data[index][0] < step_end:
                         index += 1
+                        continue
+                    elif (step_end - datetime.timedelta(seconds=step/2)) <= data[index][0] \
+                        <= (step_end + datetime.timedelta(seconds=step/2)):
+                        index += 1
+                        step_end += datetime.timedelta(seconds=step)
                         continue
                     data.insert(index, (step_end, None))
             except IndexError:
                 # import ipdb; ipdb.set_trace()
-                if index < len(data) and (data[index][0] <= step_end):
+                if index < len(data) and ((data[index][0] - datetime.timedelta(seconds=step/2)) <= step_end):
                     break
                 data.insert(index, (step_end, None))
             step_end += datetime.timedelta(seconds=step)
