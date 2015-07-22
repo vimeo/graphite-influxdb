@@ -15,12 +15,15 @@ class GraphiteInfluxdbTestCase(unittest.TestCase):
                            # Two points in same step
                            (self.start_time + datetime.timedelta(minutes=40), random.randint(1,5)),
                            (self.start_time + datetime.timedelta(minutes=40, seconds=30), random.randint(1,5)),
-                           (self.start_time + datetime.timedelta(minutes=60), random.randint(1,5)),
+                           (self.start_time + datetime.timedelta(minutes=59), random.randint(1,5)),
                            ]
 
     def test_fix_datapoints(self):
         """Test that filling datapoints gives expected results"""
-        self.datapoints = self.reader.fix_datapoints(self.datapoints,
+        # self.datapoints = self.reader.fix_datapoints(self.datapoints,
+        #                            int(self.start_time.strftime("%s")),
+        #                            int(self.end_time.strftime("%s")), self.step, self.series_name)
+        self.reader.fix_datapoints(self.datapoints,
                                    int(self.start_time.strftime("%s")),
                                    int(self.end_time.strftime("%s")), self.step, self.series_name)
         # import ipdb; ipdb.set_trace()

@@ -177,12 +177,15 @@ class InfluxdbReader(object):
         """
         for series_name in data:
             logger.debug("fix_datapoints_multi() on series with name %s invoking fix_datapoints()", series_name)
-            _data = InfluxdbReader.fix_datapoints(data[series_name], start_time, end_time, step, series_name)
-            _data = _data.where(pandas.notnull(_data), None)
+            InfluxdbReader.fix_datapoints(data[series_name], start_time, end_time, step, series_name)
+            # import ipdb; ipdb.set_trace()
+            data[series_name] = (v[1] for v in data[series_name])
+            # _data = InfluxdbReader.fix_datapoints(data[series_name], start_time, end_time, step, series_name)
+            # _data = _data.where(pandas.notnull(_data), None)
             # Return generator as data series target so as not to duplicate the list(s)
             # Need to flatten the list first to remove the datetime so cannot just return
             # the existing list objects here
-            data[series_name] = (v for v in _data['value'])
+            # data[series_name] = (v for v in _data['value'])
         return data
 
     @staticmethod
@@ -196,9 +199,7 @@ class InfluxdbReader(object):
         :param target_start_time: Target start time of datapoint array
         :param step: Step increment in seconds
         :rtype: int"""
-        
-        while (data[index][0] - datetime.timedelta(seconds=step/2)) > \
-          target_start_time < (data[index][0] + datetime.timedelta(seconds=step/2)):
+        while data[index][0] > target_start_time < (data[index][0] - datetime.timedelta(seconds=step/2)):
             data.insert(index, (target_start_time, None))
             index += 1
             target_start_time += datetime.timedelta(seconds=step)
@@ -215,77 +216,67 @@ class InfluxdbReader(object):
         :param target_start_time: Target end time data array should have values until
         :param step: Step increment in seconds
         :rtype: int"""
-        while (data[index][0] - datetime.timedelta(seconds=step/2)) <= \
-          target_end_time >= (data[index][0] + datetime.timedelta(seconds=step/2)):
-            dt = data[index][0] + datetime.timedelta(seconds=step)
-            index += 1
-            # 
+        step_end = data[index][0] + datetime.timedelta(seconds=step)
+        while data[index][0] <= target_end_time:
+            from pprint import pprint
+            # import ipdb; ipdb.set_trace()
             try:
-                if abs((data[index][0] - dt)).seconds <= step:
-                    # import ipdb; ipdb.set_trace()
-                    val1, val2 = data[index-1][1] if data[index-1][1] else 0, \
-                        data[index][1] if data[index][1] else 0
-                    val = (val1 + val2)/2
-                    logger.debug("Got multiple datapoints within step - averaging %s and %s",
-                                 data[index][1], data[index+1][1])
-                    data.insert(index, (dt, val))
-                    # del data[index-1]
+                while data[index][0] >= step_end > (data[index+1][0] - datetime.timedelta(seconds=step)):
+                    val1 = data[index][1] if data[index][1] else 0
+                    val = (val1 + data[index+1][1])/2.0
                     del data[index+1]
+                    del data[index]
+                    data.insert(index, (step_end, val))
+                    index -= 1
                     continue
-                    # import ipdb; ipdb.set_trace()
-                    # InfluxdbReader._remove_multi_points_near_index(data, index, dt, step)
-                if data[index][0] > dt:
-                    data.insert(index, (dt, None))
+                else:
+                    if data[index][0] <= step_end:
+                        index += 1
+                        continue
+                    data.insert(index, (step_end, None))
             except IndexError:
-                data.insert(index, (dt, None))
-        return index+1
-
-    @staticmethod
-    def _remove_multi_points_near_index(datapoints, index, curtime, step):
-        try:
-            _next_time, _next_value = datapoints[index+1][0], datapoints[index+1][1]
-        except IndexError:
-            _next_time, _next_value = None, None
-        # Do we have two or more datapoints in same bucket?
-        # Use last datapoint, ignore others
-        if _next_time and ((_next_time - curtime).seconds <= step):
-            del datapoints[index]
-            return True
+                # import ipdb; ipdb.set_trace()
+                if data[index][0] <= step_end and (index == len(data)-1):
+                    break
+                data.insert(index, (step_end, None))
+            step_end += datetime.timedelta(seconds=step)
+            index += 1
 
     @staticmethod
     def fix_datapoints(datapoints, start_time, end_time, step, debug_key):
         """
         points is a list of known points (potentially empty)
         """
-        if not datapoints:
-            return []
-        steps = int(round((end_time - start_time) * 1.0 / step))
-        start_time, end_time = datetime.datetime.fromtimestamp(start_time), datetime.datetime.fromtimestamp(end_time)
-        datapoints.insert(0, (start_time, None))
-        datapoints.insert(len(datapoints), (end_time, None))
-
-        df = pandas.DataFrame(data=(d[1] for d in datapoints),
-                              index=(d[0] for d in datapoints),
-                              columns=['value'])
-        return df.resample('%sS' % (step,))
-        ## Pure python
-        #######
         # if not datapoints:
         #     return []
         # steps = int(round((end_time - start_time) * 1.0 / step))
         # start_time, end_time = datetime.datetime.fromtimestamp(start_time), datetime.datetime.fromtimestamp(end_time)
-        # logger.debug("fix_datapoints() key=%s len_datapoints=%d start_time=%s end_time=%s step=%s",
-        #              debug_key, len(datapoints), start_time, end_time, step,)
-        # if len(datapoints) == 1:
-        #     logger.debug("fix_datapoints() key=%s only_known_point=%s", debug_key, datapoints[0])
-        # elif len(datapoints) > 1:
-        #     logger.debug("fix_datapoints() key=%s first_known_point=%s", debug_key, datapoints[0])
-        #     logger.debug("fix_datapoints() key=%s last_known_point=%s", debug_key, datapoints[-1])
-        # if len(datapoints) == steps + 1:
-        #     return datapoints
-        # # Fill gaps from our start time until first datapoint
-        # i = InfluxdbReader._fill_start_gaps(datapoints, 0,
-        #                                     start_time, step)
+        # datapoints.insert(0, (start_time, None))
+        # datapoints.insert(len(datapoints), (end_time, None))
+
+        # df = pandas.DataFrame(data=(d[1] for d in datapoints),
+        #                       index=(d[0] for d in datapoints),
+        #                       columns=['value'])
+        # return df.resample('%sS' % (step,))
+        ## Pure python
+        #######
+        if not datapoints:
+            return []
+        steps = int(round((end_time - start_time) * 1.0 / step))
+        start_time, end_time = datetime.datetime.fromtimestamp(start_time), datetime.datetime.fromtimestamp(end_time)
+        logger.debug("fix_datapoints() key=%s len_datapoints=%d start_time=%s end_time=%s step=%s",
+                     debug_key, len(datapoints), start_time, end_time, step,)
+        if len(datapoints) == 1:
+            logger.debug("fix_datapoints() key=%s only_known_point=%s", debug_key, datapoints[0])
+        elif len(datapoints) > 1:
+            logger.debug("fix_datapoints() key=%s first_known_point=%s", debug_key, datapoints[0])
+            logger.debug("fix_datapoints() key=%s last_known_point=%s", debug_key, datapoints[-1])
+        if len(datapoints) == steps + 1:
+            return datapoints
+        # Fill gaps from our start time until first datapoint
+        i = InfluxdbReader._fill_start_gaps(datapoints, 0,
+                                            start_time, step)
+        InfluxdbReader._fill_end_gaps(datapoints, i, end_time, step)
         # while i < len(datapoints):
         #     # Fill gaps from last datapoint to end_time and stop
         #     if i == (len(datapoints)-1):
@@ -299,8 +290,8 @@ class InfluxdbReader(object):
         #         _next_time, _next_value = None, None
         #     # Do we have two or more datapoints in same bucket?
         #     # Use last datapoint, ignore others.
-        #     if InfluxdbReader._remove_multi_points_near_index(datapoints, i+1, _curtime, step):
-        #         continue
+        #     # if InfluxdbReader._remove_multi_points_near_index(datapoints, i+1, _curtime, step):
+        #     #     continue
         #     # Fill gaps from current until next datapoint's time
         #     # import ipdb; ipdb.set_trace()
         #     i = InfluxdbReader._fill_end_gaps(datapoints, i, _next_time, step)
