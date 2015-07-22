@@ -217,7 +217,8 @@ class InfluxdbReader(object):
         :param step: Step increment in seconds
         :rtype: int"""
         step_end = data[index][0] + datetime.timedelta(seconds=step)
-        while data[index][0] <= target_end_time:
+        # import ipdb; ipdb.set_trace()
+        while step_end <= target_end_time:
             from pprint import pprint
             # import ipdb; ipdb.set_trace()
             try:
@@ -236,7 +237,7 @@ class InfluxdbReader(object):
                     data.insert(index, (step_end, None))
             except IndexError:
                 # import ipdb; ipdb.set_trace()
-                if data[index][0] <= step_end and (index == len(data)-1):
+                if index < len(data) and (data[index][0] <= step_end):
                     break
                 data.insert(index, (step_end, None))
             step_end += datetime.timedelta(seconds=step)
