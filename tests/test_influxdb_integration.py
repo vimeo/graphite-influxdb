@@ -126,6 +126,7 @@ class GraphiteInfluxdbIntegrationTestCase(unittest.TestCase):
                          self.step),
                          msg="Time info and step do not match our requested values")
         for series in [self.series1, self.series2]:
+            data[series] = list(data[series])
             self.assertTrue(self.steps == len(data[series]),
                             msg="Expected %s datapoints, got %s instead" % (
                             self.steps, len(data[series]),))

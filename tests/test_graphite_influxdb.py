@@ -8,7 +8,8 @@ class GraphiteInfluxdbTestCase(unittest.TestCase):
 
     def setUp(self):
         self.step = 60
-        self.reader = graphite_influxdb.InfluxdbReader(None, None, self.step, None)
+        self.reader = graphite_influxdb.InfluxdbReader(None, None, self.step, None,
+                                                       graphite_influxdb.NullStatsd())
         st = datetime.datetime(2012, 01, 01, 10, 0, 5)
         self.start_time, self.end_time, self.series_name = st, \
           st + datetime.timedelta(minutes=10), 'my_series'
