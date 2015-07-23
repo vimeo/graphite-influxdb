@@ -55,6 +55,15 @@ class GraphiteInfluxdbIntegrationTestCase(unittest.TestCase):
         self.series = [self.series1, self.series2]
         self.setup_db()
 
+    def test_compile_regex(self):
+        metric_query_pat = 'metric_prefix.*'
+        expected = "^metric_prefix\\.[^\\.]*$"
+        rec = self.finder.compile_regex('^{0}$', Query(metric_query_pat))
+        self.assertEqual(rec.pattern, expected,
+                         msg="Got unexpected compiled regex pattern %s from graphite metric query %s. "
+                         "Expected compiled pattern %s" % (
+                             rec.pattern, metric_query_pat, expected,))
+
     def test_find_series(self):
         """Test finding a series by name"""
         nodes = [node.name for node in self.finder.find_nodes(Query(self.series1))
