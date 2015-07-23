@@ -36,6 +36,8 @@ class GraphiteInfluxdbIntegrationTestCase(unittest.TestCase):
         self.step, self.num_datapoints, self.db_name = 60, 2, 'integration_test'
         self.start_time, self.end_time = (datetime.datetime.utcnow() - datetime.timedelta(hours=1)), \
           datetime.datetime.utcnow()
+        self.steps = int(round((int(self.end_time.strftime("%s")) - \
+                                int(self.start_time.strftime("%s"))) * 1.0 / self.step)) + 1
         self.client = InfluxDBClient(database=self.db_name)
         self.config = { 'influxdb' : { 'host' : 'localhost',
                                        'port' : 8086,
@@ -100,7 +102,11 @@ class GraphiteInfluxdbIntegrationTestCase(unittest.TestCase):
         node = list(self.finder.find_nodes(Query(self.series1)))[0]
         time_info, data = node.reader.fetch(int(self.start_time.strftime("%s")),
                                             int(self.end_time.strftime("%s")))
-        datapoints = [v for v in data[self.series1] if v]
+        data = list(data)
+        self.assertTrue(self.steps == len(data),
+                        msg="Expected %s datapoints, got %s instead" % (
+                            self.steps, len(data),))
+        datapoints = [v for v in data if v]
         self.assertTrue(len(datapoints) == self.num_datapoints,
                         msg="Expected %s datapoints - got %s" % (
                             self.num_datapoints, len(datapoints),))
@@ -120,6 +126,9 @@ class GraphiteInfluxdbIntegrationTestCase(unittest.TestCase):
                          self.step),
                          msg="Time info and step do not match our requested values")
         for series in [self.series1, self.series2]:
+            self.assertTrue(self.steps == len(data[series]),
+                            msg="Expected %s datapoints, got %s instead" % (
+                            self.steps, len(data[series]),))
             datapoints = [v for v in data[series] if v]
             self.assertTrue(len(datapoints) == self.num_datapoints,
                             msg="Expected %s datapoints for series %s - got %s" % (
