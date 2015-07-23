@@ -4,8 +4,6 @@ import logging
 from logging.handlers import TimedRotatingFileHandler
 import datetime
 from influxdb import InfluxDBClient
-import pandas
-from pandas import DataFrame
 
 logger = logging.getLogger('graphite_influxdb')
 logging.basicConfig()
