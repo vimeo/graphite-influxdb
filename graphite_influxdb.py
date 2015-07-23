@@ -47,37 +47,6 @@ class NullStatsd():
         pass
 
 
-class FakeCache(object):
-    """Fake cache object with dummy add/get methods for use in the case
-    that cache is not configured"""
-
-    def get(self, *args):
-        return
-
-    def add(self, *args, **kwargs):
-        pass
-
-_CACHE = FakeCache()
-# import ipdb; ipdb.set_trace()
-## This block always fails..
-# try:
-#     from graphite_api.app import app
-# except (ImportError, AttributeError):
-#     try:
-#         import django.core.exceptions
-#         from django.core.cache import cache
-#     except (ImportError, AttributeError):
-#         raise SystemExit(1, "You have neither graphite_api nor \
-#     django in your pythonpath")
-#     except django.core.exceptions.ImproperlyConfigured:
-#         pass
-#     else:
-#         _CACHE = cache if cache else _CACHE
-# else:
-#     # Using getattr to not break horribly if app.cache is not set
-#     _cache = getattr(app, 'cache', FakeCache())
-#     _CACHE = _cache if _cache else _CACHE
-
 def normalize_config(config=None):
     ret = {}
     if config is not None:
@@ -97,7 +66,8 @@ def normalize_config(config=None):
         ret['es_index'] = cfg.get('index', 'graphite_metrics2')
         ret['es_hosts'] = cfg.get('hosts', ['localhost:9200'])
         ret['es_field'] = cfg.get('field', '_id')
-        ret['statsd'] = cfg.get('statsd', {})
+        if config.get('statsd', None):
+            ret['statsd'] = config.get('statsd')
     else:
         from django.conf import settings
         ret['host'] = getattr(settings, 'INFLUXDB_HOST', 'localhost')
@@ -128,13 +98,12 @@ def _make_graphite_api_points_list(influxdb_data):
     return _data
 
 class InfluxdbReader(object):
-    __slots__ = ('client', 'path', 'step', 'cache', 'statsd_client')
+    __slots__ = ('client', 'path', 'step', 'statsd_client')
 
-    def __init__(self, client, path, step, cache, statsd_client):
+    def __init__(self, client, path, step, statsd_client):
         self.client = client
         self.path = path
         self.step = step
-        self.cache = cache
         self.statsd_client = statsd_client
 
     def fetch(self, start_time, end_time):
@@ -263,26 +232,22 @@ class InfluxLeafNode(LeafNode):
 
 class InfluxdbFinder(object):
     __fetch_multi__ = 'influxdb'
-    __slots__ = ('client', 'es', 'schemas', 'cache', 'config', 'statsd_client')
+    __slots__ = ('client', 'es', 'schemas', 'config', 'statsd_client')
 
     def __init__(self, config=None):
         # Shouldn't be trying imports in __init__.
         # It turns what should be a load error into a runtime error
-        # If cache is not configured, use fake cache object
-        # so that calls to cache.add/get will not break
-        self.cache = _CACHE
         config = normalize_config(config)
         self.config = config
         self.client = InfluxDBClient(config['host'], config['port'], config['user'], config['passw'], config['db'], config['ssl'])
         self.schemas = [(re.compile(patt), step) for (patt, step) in config['schema']]
         try:
-            # import ipdb; ipdb.set_trace()
             self.statsd_client = statsd.StatsClient(config['statsd'].get('host'),
                                                     config['statsd'].get('port', 8125)) \
                                                     if 'statsd' in config and config['statsd'].get('host') else NullStatsd()
         except NameError:
-            logger.warning("Statsd client configuration present but 'statsd' module not installed - ignoring \
-statsd configuration..")
+            logger.warning("Statsd client configuration present but 'statsd' module"
+                           "not installed - ignoring statsd configuration..")
             self.statsd_client = NullStatsd()
         self._setup_logger(config['log_level'], config['log_file'])
         self.es = None
@@ -290,8 +255,8 @@ statsd configuration..")
             try:
                 from elasticsearch import Elasticsearch
             except ImportError:
-                logger.warning("Elasticsearch configuration present but 'elasticsearch' module not installed - ignoring \
-elasticsearch configuration..")
+                logger.warning("Elasticsearch configuration present but 'elasticsearch'"
+                               "module not installed - ignoring elasticsearch configuration..")
             else:
                 self.es = Elasticsearch(config['es_hosts'])
 
@@ -319,12 +284,6 @@ elasticsearch configuration..")
 
     def assure_series(self, query):
         key_series = "%s_series" % query.pattern
-        with self.statsd_client.timer('service_is_graphite-api.action_is_cache_get_series.target_type_is_gauge.unit_is_ms'):
-            series = self.cache.get(key_series)
-        if series is not None:
-            return series
-        # if not in cache, generate from scratch
-        # if ES configured, try it first, it's usually fastest.
         done = False
         if self.es:
             # note: ES always treats a regex as anchored at start and end
@@ -363,10 +322,6 @@ elasticsearch configuration..")
                 # series with bad data in the metric names, we must filter out
                 # like so:
                 series = [key_name for (key_name,_) in ret.keys()]
-
-        # store in cache
-        with self.statsd_client.timer('service_is_graphite-api.action_is_cache_set_series.target_type_is_gauge.unit_is_ms'):
-            self.cache.add(key_series, series, timeout=300)
         return series
 
     def compile_regex(self, fmt, query):
@@ -381,10 +336,6 @@ elasticsearch configuration..")
 
     def get_leaves(self, query):
         key_leaves = "%s_leaves" % query.pattern
-        with self.statsd_client.timer('service_is_graphite-api.action_is_cache_get_leaves.target_type_is_gauge.unit_is_ms'):
-            data = self.cache.get(key_leaves)
-        if data is not None:
-            return data
         series = self.assure_series(query)
         regex = self.compile_regex('^{0}$', query)
         logger.debug("get_leaves() key %s", key_leaves)
@@ -403,17 +354,11 @@ elasticsearch configuration..")
                      key_leaves,
                      dt.seconds,
                      dt.microseconds)
-        with self.statsd_client.timer('service_is_graphite-api.action_is_cache_set_leaves.target_type_is_gauge.unit_is_ms'):
-            self.cache.add(key_leaves, leaves, timeout=300)
         return leaves
 
     def get_branches(self, query):
         seen_branches = set()
         key_branches = "%s_branches" % query.pattern
-        with self.statsd_client.timer('service_is_graphite-api.action_is_cache_get_branches.target_type_is_gauge.unit_is_ms'):
-            data = self.cache.get(key_branches)
-        if data is not None:
-            return data
         # Very inefficient call to list
         series = self.assure_series(query)
         regex = self.compile_regex('^{0}$', query)
@@ -436,8 +381,6 @@ elasticsearch configuration..")
         logger.debug("get_branches() %s Finished find_branches in %s.%ss",
                      key_branches,
                      dt.seconds, dt.microseconds)
-        with self.statsd_client.timer('service_is_graphite-api.action_is_cache_set_branches.target_type_is_gauge.unit_is_ms'):
-            self.cache.add(key_branches, branches, timeout=300)
         return branches
 
     def find_nodes(self, query):
@@ -446,7 +389,7 @@ elasticsearch configuration..")
         with self.statsd_client.timer('service_is_graphite-api.action_is_yield_nodes.target_type_is_gauge.unit_is_ms.what_is_query_duration'):
             for (name, res) in self.get_leaves(query):
                 yield InfluxLeafNode(name, InfluxdbReader(
-                    self.client, name, res, self.cache, self.statsd_client))
+                    self.client, name, res, self.statsd_client))
             for name in self.get_branches(query):
                 logger.debug("Yielding branch %s" % (name,))
                 yield BranchNode(name)

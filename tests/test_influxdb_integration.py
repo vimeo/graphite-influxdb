@@ -46,7 +46,7 @@ class GraphiteInfluxdbIntegrationTestCase(unittest.TestCase):
                                        'db' : self.db_name,
                                        'schema' : [('', 60)],
                                        'log_level' : 'debug',
-                                       }}
+                                       },}
         self.finder = graphite_influxdb.InfluxdbFinder(self.config)
         self.metric_prefix = "integration_test"
         self.nodes = ["leaf_node1", "leaf_node2"]
