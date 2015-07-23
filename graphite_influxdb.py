@@ -20,6 +20,8 @@ except ImportError:
         raise SystemExit(1, "You have neither graphite_api nor \
     the graphite webapp in your pythonpath")
 
+# Tell influxdb to return time as seconds from epoch
+_INFLUXDB_CLIENT_PARAMS = {'epoch' : 's'}
 
 class NullStatsd():
     def __enter__(self):
@@ -134,8 +136,7 @@ def _make_graphite_api_points_list(influxdb_data):
     """Make graphite-api data points dictionary from Influxdb ResultSet data"""
     _data = {}
     for key in influxdb_data.keys():
-        _data[key[0]] = [(datetime.datetime.strptime(d['time'].split('.')[0].replace('Z', ''),
-                                                     "%Y-%m-%dT%H:%M:%S"),
+        _data[key[0]] = [(datetime.datetime.fromtimestamp(float(d['time'])),
                           d['value']) for d in influxdb_data[key]]
     return _data
 
@@ -158,7 +159,7 @@ class InfluxdbReader(object):
             _query = 'select value from "%s" where (time > %ds and time <= %ds)' % (
                 self.path, start_time, end_time,)
             logger.debug("fetch() path=%s querying influxdb query: '%s'", self.path, _query)
-            data = self.client.query(_query)
+            data = self.client.query(_query, params=_INFLUXDB_CLIENT_PARAMS)
         logger.debug("fetch() path=%s returned data: %s", self.path, data)
         try:
             data = _make_graphite_api_points_list(data)
@@ -362,7 +363,7 @@ class InfluxdbFinder(object):
             with statsd.timer('service_is_graphite-api.ext_service_is_influxdb.target_type_is_gauge.unit_is_ms.action_is_get_series'):
                 _query = "show series from /%s/" % regex.pattern
                 logger.debug("assure_series() Calling influxdb with query - %s", _query)
-                ret = self.client.query(_query)
+                ret = self.client.query(_query, params=_INFLUXDB_CLIENT_PARAMS)
                 # as long as influxdb doesn't have good safeguards against
                 # series with bad data in the metric names, we must filter out
                 # like so:
@@ -470,7 +471,7 @@ class InfluxdbFinder(object):
 
         with statsd.timer('service_is_graphite-api.ext_service_is_influxdb.target_type_is_gauge.unit_is_ms.action_is_select_datapoints'):
             logger.debug("Calling influxdb multi fetch with query - %s", query)
-            data = self.client.query(query)
+            data = self.client.query(query, params=_INFLUXDB_CLIENT_PARAMS)
         logger.debug('fetch_multi() - Retrieved %d result set(s)', len(data))
         data = _make_graphite_api_points_list(data)
         # some series we requested might not be in the resultset.
