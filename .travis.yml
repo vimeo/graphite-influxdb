@@ -9,13 +9,6 @@ before_install:
   - sudo dpkg -i influxdb_${INFLUXDB_VERSION}_amd64.deb
   - sudo /etc/init.d/influxdb start
   - sleep 5
-  - curl -G http://localhost:8086/query --data-urlencode "q=CREATE DATABASE graphite"
-  - now=`date +%s`; half_hour_ago=$(echo "${now}-1800" | bc -l); curl -XPOST 'http://localhost:8086/write?db=graphite' --data-binary "integration_test value=3 ${half_hour_ago}010000000"
-  - now=`date +%s`; half_hour_ago=$(echo "${now}-1800" | bc -l); curl -XPOST 'http://localhost:8086/write?db=graphite' --data-binary "integration_test value=3 ${now}010000000"
-  - now=`date +%s`; half_hour_ago=$(echo "${now}-1800" | bc -l); curl -XPOST 'http://localhost:8086/write?db=graphite' --data-binary "integration_test.leaf_node1 value=2 ${half_hour_ago}010000000"
-  - now=`date +%s`; half_hour_ago=$(echo "${now}-1800" | bc -l); curl -XPOST 'http://localhost:8086/write?db=graphite' --data-binary "integration_test.leaf_node1 value=2 ${now}010000000"
-  - now=`date +%s`; half_hour_ago=$(echo "${now}-1800" | bc -l); curl -XPOST 'http://localhost:8086/write?db=graphite' --data-binary "integration_test.leaf_node2 value=2 ${half_hour_ago}010000000"
-  - now=`date +%s`; half_hour_ago=$(echo "${now}-1800" | bc -l); curl -XPOST 'http://localhost:8086/write?db=graphite' --data-binary "integration_test.leaf_node2 value=2 ${now}010000000"
 install:
   - pip install -r requirements.txt
   - pip install coverage
