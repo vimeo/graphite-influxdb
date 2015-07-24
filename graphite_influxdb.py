@@ -329,5 +329,5 @@ class InfluxdbFinder(object):
             data.setdefault(key, [])
         time_info = start_time, end_time, step
         for key in data:
-            data[key] = (v[1] for v in data[key])
+            data[key] = [v[1] for v in data[key]]
         return time_info, data
