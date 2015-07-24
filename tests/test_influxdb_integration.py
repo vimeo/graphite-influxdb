@@ -111,7 +111,6 @@ class GraphiteInfluxdbIntegrationTestCase(unittest.TestCase):
         node = list(self.finder.find_nodes(Query(self.series1)))[0]
         time_info, data = node.reader.fetch(int(self.start_time.strftime("%s")),
                                             int(self.end_time.strftime("%s")))
-        data = list(data)
         self.assertTrue(self.steps == len(data),
                         msg="Expected %s datapoints, got %s instead" % (
                             self.steps, len(data),))
@@ -135,7 +134,6 @@ class GraphiteInfluxdbIntegrationTestCase(unittest.TestCase):
                          self.step),
                          msg="Time info and step do not match our requested values")
         for series in [self.series1, self.series2]:
-            data[series] = list(data[series])
             self.assertTrue(self.steps == len(data[series]),
                             msg="Expected %s datapoints, got %s instead" % (
                             self.steps, len(data[series]),))

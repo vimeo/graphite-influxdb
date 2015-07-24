@@ -124,7 +124,7 @@ class InfluxdbReader(object):
             logger.debug("fetch() path=%s COULDN'T READ POINTS. SETTING TO EMPTY LIST", self.path)
             data = []
         time_info = start_time, end_time, self.step
-        return time_info, (v[1] for v in data[self.path])
+        return time_info, [v[1] for v in data[self.path]]
     
     def get_intervals(self):
         now = int(time.time())
