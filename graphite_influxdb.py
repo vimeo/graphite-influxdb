@@ -10,8 +10,6 @@ except ImportError:
     pass
 
 logger = logging.getLogger('graphite_influxdb')
-# logging.basicConfig()
-# logger.setLevel(logging.DEBUG)
 
 try:
     from graphite_api.intervals import Interval, IntervalSet
