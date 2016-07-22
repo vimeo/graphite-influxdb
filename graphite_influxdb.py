@@ -224,11 +224,7 @@ class InfluxdbFinder(object):
                 # as long as influxdb doesn't have good safeguards against
                 # series with bad data in the metric names, we must filter out
                 # like so:
-                series = []
-                for item in ret.items():
-                    for subitem in item[1]:
-                        series.append(subitem['key'])
-        logger.debug("series - %s", str(series))
+                series = [key_name for [key_name] in  ret.raw['series'][0]['values']]
         return series
 
     def compile_regex(self, fmt, query):
