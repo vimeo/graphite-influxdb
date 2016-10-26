@@ -3,6 +3,12 @@ Graphite-InfluxDB
 
 An influxdb (0.8-rc5 or higher) backend for Graphite-web (source or 0.10.x) or graphite-api.
 
+STATUS
+======
+
+THIS PROJECT IS NO LONGER MAINTAINED.
+CHECK OUT [InfluxGraph](https://github.com/InfluxGraph/influxgraph) instead.
+
 
 Install and configure using docker
 ----------------------------------
